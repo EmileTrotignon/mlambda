@@ -1,0 +1,45 @@
+let rec map = fun f li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) ->
+    (:: (f ele, map f li))
+
+let rec map_double = fun f li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) ->
+    (:: (f ele, :: (f ele, map_double f li)))
+
+let rec map_double_cond = fun f p li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) -> (
+    let cond = p ele in
+    let ele' = f ele in
+    print cond ;
+    print ele' ;
+    :: (f ele,
+        if p ele then
+          :: (f ele, map_double_cond f p li)
+        else map_double_cond f p li) )
+
+let rec map_let = fun f li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) -> (
+    let li = map_let f li in
+    (:: (f ele, li)) )
+
+
+let rec map_double_cond_let = fun f p li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) -> (
+    let cond = p ele in
+    let ele' = f ele in
+    print cond ;
+    print ele' ;
+    let li = map_double_cond_let f p li in
+    :: ( f ele
+       , if p ele then :: (f ele, li)
+         else li) )

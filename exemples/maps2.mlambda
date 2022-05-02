@@ -1,0 +1,21 @@
+let rec map = fun f li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) ->
+    (:: (f ele, map f li))
+
+let rec map_double = fun f li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) ->
+    (:: (f ele, :: (f ele, map f li)))
+
+
+let rec map_double_cond = fun f p li ->
+  match li with
+  | [] -> []
+  | :: (ele, li) -> (
+    :: (f ele,
+        if p ele then
+          :: (f ele, map f li)
+        else map f li) )

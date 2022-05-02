@@ -1,0 +1,9 @@
+(library
+ (name mlambda)
+ (libraries pprint))
+
+(ocamllex lexer)
+
+(menhir
+ (modules parser)
+ (flags --explain))

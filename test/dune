@@ -1,0 +1,5 @@
+(test
+ (name maps)
+ (libraries mlambda alcotest)
+ (deps
+  (file maps.mlambda)))
