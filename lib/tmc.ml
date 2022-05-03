@@ -137,26 +137,17 @@ let rec transform_expr_dps_let self first_cons index let_cands expr =
     match index with Some index -> e_int (index + 1) | None -> e_var "index"
   in
   match expr with
-  | EVar var -> (
-    match Env.find_opt var let_cands with
-    | None ->
-        None
-    | Some args ->
-        let+ _ = index in
+  | EVar var ->
+      let+ args = Env.find_opt var let_cands in
+      ( StringSet.empty
+      , EApply
+          {func= EVar (self ^ "_dps"); args= e_var "dst'" :: e_index :: args} )
+  | EApply {func= EVar func_name; args} when func_name = self ->
+      Some
         ( StringSet.empty
         , EApply
             {func= EVar (self ^ "_dps"); args= e_var "dst'" :: e_index :: args}
-        ) )
-  | EApply {func= EVar func_name; args} when func_name = self ->
-      Some
-        ( match index with
-        | Some _index ->
-            ( StringSet.empty
-            , EApply
-                { func= EVar (self ^ "_dps")
-                ; args= e_var "dst'" :: e_index :: args } )
-        | None ->
-            (StringSet.empty, expr) )
+        )
   | ELet
       {var; value= EApply {func= EVar func_name; args}; body_in; is_rec= false}
     when func_name = self ->
@@ -180,17 +171,33 @@ let rec transform_expr_dps_let self first_cons index let_cands expr =
       in
       let expr = ELet {var; is_rec; value; body_in} in
       (optimised_lets, expr)
-  | EIf {cond; body_if; body_else; _} ->
-      let* optimised_vars_if, body_if =
+  | EIf {cond; body_if; body_else; _} -> (
+      let result_if =
         transform_expr_dps_let self first_cons index let_cands body_if
-      in
-      let+ optimised_vars_else, body_else =
+      and result_else =
         transform_expr_dps_let self first_cons index let_cands body_else
       in
-      let optimised_vars =
-        StringSet.(optimised_vars_if + optimised_vars_else)
-      in
-      (optimised_vars, EIf {cond; body_if; body_else})
+      match (result_if, result_else) with
+      | None, None ->
+          None
+      | Some (optimised_vars, body_if), None ->
+          Some
+            ( optimised_vars
+            , e_if cond ~then_:body_if
+                ~else_:(e_write ~block:(e_var "dst") ~i:e_index ~to_:body_else)
+            )
+      | None, Some (optimised_vars, body_else) ->
+          Some
+            ( optimised_vars
+            , e_if cond
+                ~then_:(e_write ~block:(e_var "dst") ~i:e_index ~to_:body_if)
+                ~else_:body_else )
+      | Some (optimised_vars_if, body_if), Some (optimised_vars_else, body_else)
+        ->
+          let optimised_vars =
+            StringSet.(optimised_vars_if + optimised_vars_else)
+          in
+          Some (optimised_vars, EIf {cond; body_if; body_else}) )
   | ECons {cons; payload} ->
       let+ (optimised_lets, expr), payload =
         List.find_and_replace_i
