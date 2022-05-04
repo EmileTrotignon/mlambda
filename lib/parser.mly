@@ -91,7 +91,7 @@ let write_expr :=
 
 let if_expr :=
 | ~=cons_expr; <>
-| IF; cond=if_expr; THEN; body_if=if_expr; ELSE; body_else=cons_expr; { EIf {cond; body_if; body_else} }
+| IF; cond=if_expr; THEN; then_=if_expr; ELSE; else_=cons_expr; { e_if cond ~then_ ~else_ }
 
 let cons_expr :=
 | ~=apply_expr; <>

@@ -8,8 +8,6 @@ let rec transformable_expr self expr =
       true
   | ELet {body_in; _} ->
       transformable_expr self body_in
-  | EIf {body_if; body_else; _} ->
-      transformable_expr self body_if || transformable_expr self body_else
   | ECons {cons= _; payload} ->
       List.exists (transformable_expr self) payload
   | EMatch {arg= _; branches} ->
@@ -78,8 +76,6 @@ let rec fv (expr : expr) =
         union (fv arr) (fv index)
     | EWrite {arr; index; value} ->
         union (fv arr) @@ union (fv index) (fv value)
-    | EIf {cond; body_if; body_else} ->
-        union (fv cond) @@ union (fv body_if) (fv body_else)
     | EUnit ->
         empty
     | ECons {cons= _; payload} ->
@@ -112,10 +108,6 @@ let rec transformable_expr_lets rec_calls_bindings self expr =
         StringSet.(remove var rec_calls_bindings - fv_value)
       in
       transformable_expr_lets rec_calls_bindings self body_in
-  | EIf {cond; body_if; body_else} ->
-      let rec_calls_bindings = StringSet.(rec_calls_bindings - fv cond) in
-      transformable_expr_lets rec_calls_bindings self body_if
-      || transformable_expr_lets rec_calls_bindings self body_else
   | ECons {cons= _; payload} ->
       List.exists (transformable_expr_lets rec_calls_bindings self) payload
   | EMatch {arg; branches} ->
@@ -132,28 +124,54 @@ let rec transformable_expr_lets rec_calls_bindings self expr =
 let _transformable_expr_lets rec_calls_bindings self expr =
   transformable_expr_lets (StringSet.env_domain rec_calls_bindings) self expr
 
-let rec transform_expr_dps_let self first_cons index let_cands expr =
+let is_rec_call self n_args expr =
+  match expr with
+  | EApply {func= EVar func_name; args}
+    when func_name = self && n_args = List.length args ->
+      true
+  | _ ->
+      false
+
+let rec_call_args self n_args expr =
+  match expr with
+  | EApply {func= EVar func_name; args}
+    when func_name = self && n_args = List.length args ->
+      args
+  | _ ->
+      failwith "not a rec call"
+
+let rec transform_expr_dps self n_args first_cons index let_cands expr =
+  (* - [self] is the name of the recursive function we are transforming.
+     - [index] is [None] if the index we need to write to is [e_var "index"],
+       and [Some i] if it is [e_int i].
+     - [let_cands] is the set of identifiers that are bound to a recursive call,
+       are not ever used in that branch.
+     - [expr] is the expression we are transforming. *)
   let e_index =
     match index with Some index -> e_int (index + 1) | None -> e_var "index"
   in
   match expr with
   | EVar var ->
+      (* If [var] was bound to a recursive call earlier in the code, and wasn't
+         ever used in that branch a identifier bound to a recursive call earlier in the code,
+      *)
       let+ args = Env.find_opt var let_cands in
-      ( StringSet.empty
+      ( StringSet.singleton var
       , EApply
           {func= EVar (self ^ "_dps"); args= e_var "dst'" :: e_index :: args} )
-  | EApply {func= EVar func_name; args} when func_name = self ->
+  | e when is_rec_call self n_args e ->
+      let args = rec_call_args self n_args e in
       Some
         ( StringSet.empty
         , EApply
             {func= EVar (self ^ "_dps"); args= e_var "dst'" :: e_index :: args}
         )
-  | ELet
-      {var; value= EApply {func= EVar func_name; args}; body_in; is_rec= false}
-    when func_name = self ->
+  | ELet {var; value; body_in; is_rec= false} when is_rec_call self n_args value
+    ->
+      let args = rec_call_args self n_args value in
       let let_cands = Env.add var args let_cands in
       let+ optimised_lets, body_in =
-        transform_expr_dps_let self first_cons index let_cands body_in
+        transform_expr_dps self n_args first_cons index let_cands body_in
       in
       if StringSet.mem var optimised_lets then
         (StringSet.remove var optimised_lets, body_in)
@@ -167,43 +185,16 @@ let rec transform_expr_dps_let self first_cons index let_cands expr =
           |> to_env ~f:(Fun.flip Env.find let_cands))
       in
       let+ optimised_lets, body_in =
-        transform_expr_dps_let self first_cons index let_cands body_in
+        transform_expr_dps self n_args first_cons index let_cands body_in
       in
       let expr = ELet {var; is_rec; value; body_in} in
       (optimised_lets, expr)
-  | EIf {cond; body_if; body_else; _} -> (
-      let result_if =
-        transform_expr_dps_let self first_cons index let_cands body_if
-      and result_else =
-        transform_expr_dps_let self first_cons index let_cands body_else
-      in
-      match (result_if, result_else) with
-      | None, None ->
-          None
-      | Some (optimised_vars, body_if), None ->
-          Some
-            ( optimised_vars
-            , e_if cond ~then_:body_if
-                ~else_:(e_write ~block:(e_var "dst") ~i:e_index ~to_:body_else)
-            )
-      | None, Some (optimised_vars, body_else) ->
-          Some
-            ( optimised_vars
-            , e_if cond
-                ~then_:(e_write ~block:(e_var "dst") ~i:e_index ~to_:body_if)
-                ~else_:body_else )
-      | Some (optimised_vars_if, body_if), Some (optimised_vars_else, body_else)
-        ->
-          let optimised_vars =
-            StringSet.(optimised_vars_if + optimised_vars_else)
-          in
-          Some (optimised_vars, EIf {cond; body_if; body_else}) )
   | ECons {cons; payload} ->
       let+ (optimised_lets, expr), payload =
         List.find_and_replace_i
           (fun index expr ->
             let+ optimised_lets, expr =
-              transform_expr_dps_let self false (Some index) let_cands expr
+              transform_expr_dps self n_args false (Some index) let_cands expr
             in
             ((optimised_lets, expr), e_unit) )
           payload
@@ -220,7 +211,7 @@ let rec transform_expr_dps_let self first_cons index let_cands expr =
         List.fold_left_map
           (fun (had_a_success, lets) (pat, expr) ->
             match
-              transform_expr_dps_let self first_cons index let_cands expr
+              transform_expr_dps self n_args first_cons index let_cands expr
             with
             | Some (optimised_lets, expr) ->
                 ((true, StringSet.(optimised_lets + lets)), (pat, expr))
@@ -241,75 +232,13 @@ let rec transform_expr_dps_let self first_cons index let_cands expr =
   | EUnit ->
       None
 
-let transform_expr_dps_let self expr =
-  Option.map snd @@ transform_expr_dps_let self true None Env.empty expr
-
-let rec transform_expr_dps self first_cons index expr =
-  if transformable_expr self expr then
-    match expr with
-    | EApply {func= EVar func_name; args} when func_name = self -> (
-      match index with
-      | Some index ->
-          EApply
-            { func= EVar (self ^ "_dps")
-            ; args= e_var "dst'" :: e_int (index + 1) :: args }
-      | None ->
-          EApply {func= EVar func_name; args} )
-    | ELet let_ ->
-        ELet
-          { let_ with
-            body_in= transform_expr_dps self first_cons index let_.body_in }
-    | EIf {cond; body_if; body_else; _} ->
-        let body_if = transform_expr_dps self first_cons index body_if
-        and body_else = transform_expr_dps self first_cons index body_else in
-        EIf {cond; body_if; body_else}
-    | ECons {cons; payload} ->
-        let (new_index, expr), payload =
-          List.find_and_replace_i_exn
-            (fun index expr ->
-              if transformable_expr self expr then Some ((index, expr), e_unit)
-              else None )
-            payload
-        in
-        e_let "dst'"
-          ~equal:(ECons {cons; payload})
-          ~in_:
-            ( e_seqs
-                [ e_write ~block:(e_var "dst")
-                    ~i:
-                      ( match index with
-                      | Some i ->
-                          e_int (i + 1)
-                      | None ->
-                          e_var "index" )
-                    ~to_:(e_var "dst'") ]
-            @@ e_let "dst" ~equal:(e_var "dst'")
-                 ~in_:(transform_expr_dps self false (Some new_index) expr) )
-    | EMatch {arg; branches} ->
-        e_match arg
-          ~with_:
-            (List.map
-               (fun (pat, expr) ->
-                 (pat, transform_expr_dps self first_cons index expr) )
-               branches )
-    | EFunc _
-    | EApply _
-    | EVar _
-    | EAlloc _
-    | EPrim _
-    | EProj _
-    | EWrite _
-    | EPrimFunc _
-    | EUnit ->
-        expr
-  else e_write ~block:(e_var "dst") ~i:(e_var "index") ~to_:expr
-
-let _transform_expr_dps self expr = transform_expr_dps self true None expr
+let transform_expr_dps_let self n_args expr =
+  Option.map snd @@ transform_expr_dps self n_args true None Env.empty expr
 
 let transform_expr self expr =
   match expr with
   | EFunc {args; body} ->
-      let+ transformed = transform_expr_dps_let self body in
+      let+ transformed = transform_expr_dps_let self (List.length args) body in
       let name_dps = self ^ "_dps" in
       let dps =
         let body =

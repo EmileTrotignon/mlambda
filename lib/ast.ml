@@ -19,7 +19,6 @@ and expr =
   | EPrim of primitive
   | EProj of {arr: expr; index: expr}
   | EWrite of {arr: expr; index: expr; value: expr}
-  | EIf of {cond: expr; body_if: expr; body_else: expr}
   | EUnit
   | ECons of {cons: cons; payload: expr list}
   | ELet of {var: ident; is_rec: bool; value: expr; body_in: expr}

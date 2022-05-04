@@ -88,7 +88,11 @@ let rec expr ?(context = false) e =
       @@
       let context = true in
       expr ~context arr ^^ dot ^^ expr ~context index ^-^ !^"<-" ^-^ expr value
-  | EIf {cond; body_if; body_else} ->
+  | EMatch
+      { arg= cond
+      ; branches=
+          [(PPrim (PrBool true), body_if); (PPrim (PrBool false), body_else)] }
+    ->
       group (!^"if" ^^ (nest_break @@ expr cond) ^/^ !^"then")
       ^^ (nest_break @@ expr body_if)
       ^/^ !^"else" ^^ nest_break @@ expr body_else

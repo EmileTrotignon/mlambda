@@ -44,9 +44,6 @@ let rec expr env e =
       VFunc {env; args; body}
   | EPrimFunc (name, func) ->
       VPrFunc (name, func)
-  | EIf {cond; body_if; body_else} ->
-      let cond = cond |> expr env |> get_bool in
-      if cond then expr env body_if else expr env body_else
   | ECons {cons; payload= []} ->
       VCons cons
   | ECons {cons; payload} ->

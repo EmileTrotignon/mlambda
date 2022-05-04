@@ -32,9 +32,11 @@ let e_proj arr index = EProj {arr; index}
 
 let e_write ~block ~i ~to_ = EWrite {arr= block; index= i; value= to_}
 
-let e_if cond ~then_ ~else_ = EIf {cond; body_if= then_; body_else= else_}
-
 let e_match arg ~with_ = EMatch {arg; branches= with_}
+
+let e_if cond ~then_ ~else_ =
+  e_match cond
+    ~with_:[(p_prim (pr_bool true), then_); (p_prim (pr_bool false), else_)]
 
 let e_let ?(is_rec = false) var ~equal ~in_ =
   ELet {var; is_rec; value= equal; body_in= in_}
