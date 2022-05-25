@@ -1,6 +1,8 @@
 (library
  (name mlambda)
- (libraries pprint))
+ (libraries pprint memolib)
+ (preprocess
+  (pps ppx_memo)))
 
 (ocamllex lexer)
 

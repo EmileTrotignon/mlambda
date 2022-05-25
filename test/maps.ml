@@ -7,10 +7,10 @@ let maps = Parse.file "maps.mlambda"
 
 let maps_tmc = Tmc.program maps
 
-let () = print_program stdout maps_tmc
+(* let () = print_program stdout maps_tmc *)
 
 let rec int_list_of_value v =
-  print_value stdout v ;
+  (* print_value stdout v ; *)
   Ast.(
     match v with
     | VCons "[]" ->

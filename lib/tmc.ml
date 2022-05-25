@@ -36,14 +36,16 @@ module StringSet = struct
 
   let env_domain map = Env.fold (fun elt _ set -> add elt set) map empty
 
-  let to_env ~f set =
-    fold (fun elt map -> Env.add elt (f elt) map) set Env.empty
+  (* let to_env ~f set =
+     fold (fun elt map -> Env.add elt (f elt) map) set Env.empty *)
 
   let ( + ) = union
 
   let ( - ) = diff
 
   let unions sets = List.fold_left union empty sets
+
+  let remove_from_env env set = Env.filter (fun key _ -> not @@ mem key set) env
 end
 
 let rec pat_vars (pat : pattern) =
@@ -59,7 +61,7 @@ let rec pat_vars (pat : pattern) =
   | PCons {cons= _; payload} ->
       payload |> List.map pat_vars |> StringSet.unions
 
-let rec fv (expr : expr) =
+let%memo rec fv (expr : expr) =
   StringSet.(
     match expr with
     | EVar var ->
@@ -140,7 +142,15 @@ let rec_call_args self n_args expr =
   | _ ->
       failwith "not a rec call"
 
-let rec transform_expr_dps self n_args first_cons index let_cands expr =
+(* [transform_expr_dps self n_args index expr] can be :
+   - [None] if the transformation fails.
+   - [Some expr'] with [expr'] an expression that write the result of the
+     evaluation of [expr] in [e_var "dst"] and satisfies some other constraints :
+   - [expr] exists in the context of a recursive function of name [self] that
+     takes [n_args] arguments. [expr'] is such that recursive calls to [self] in
+     tail modulo cons position are replaced to calls to [self ^ "dps"] in tail
+     position. *)
+let rec transform_expr_dps self n_args index let_cands expr =
   (* - [self] is the name of the recursive function we are transforming.
      - [index] is [None] if the index we need to write to is [e_var "index"],
        and [Some i] if it is [e_int i].
@@ -153,7 +163,7 @@ let rec transform_expr_dps self n_args first_cons index let_cands expr =
   match expr with
   | EVar var ->
       (* If [var] was bound to a recursive call earlier in the code, and wasn't
-         ever used in that branch a identifier bound to a recursive call earlier in the code,
+         ever used in that branch, then we replace it with its arguments.
       *)
       let+ args = Env.find_opt var let_cands in
       ( StringSet.singleton var
@@ -171,34 +181,63 @@ let rec transform_expr_dps self n_args first_cons index let_cands expr =
       let args = rec_call_args self n_args value in
       let let_cands = Env.add var args let_cands in
       let+ optimised_lets, body_in =
-        transform_expr_dps self n_args first_cons index let_cands body_in
+        transform_expr_dps self n_args index let_cands body_in
       in
+      (* If this variable is part of the optmised lets set, then we optimise
+         away the let-binding *)
       if StringSet.mem var optimised_lets then
         (StringSet.remove var optimised_lets, body_in)
-      else (optimised_lets, body_in)
+      else (optimised_lets, ELet {var; value; body_in; is_rec= false})
   | ELet {var; is_rec; value; body_in} ->
       assert (not is_rec) ;
       let fv_value = fv value in
-      let let_cands =
-        StringSet.(
-          let_cands |> env_domain |> Fun.flip diff fv_value |> remove var
-          |> to_env ~f:(Fun.flip Env.find let_cands))
-      in
+      (* If recursive-call bound variable is mentionned in the right-hand side
+         of the let, we can not move the recursive call in tail position. *)
+      let let_cands = StringSet.remove_from_env let_cands fv_value in
+      (* We then transform the code after the binding. *)
       let+ optimised_lets, body_in =
-        transform_expr_dps self n_args first_cons index let_cands body_in
+        transform_expr_dps self n_args index let_cands body_in
       in
+      (* And we just restore the binding with the transformed [body_in] *)
       let expr = ELet {var; is_rec; value; body_in} in
       (optimised_lets, expr)
   | ECons {cons; payload} ->
+      let fv_payload = List.map fv payload in
       let+ (optimised_lets, expr), payload =
         List.find_and_replace_i
           (fun index expr ->
-            let+ optimised_lets, expr =
-              transform_expr_dps self n_args false (Some index) let_cands expr
+            (* Here we use the current index, because if we manage to transform
+               [expr] into [expr'], [expr'] should write in [dst.index]. This
+               does not affect success *)
+            (*  *)
+            let fv_others =
+              fv_payload
+              |> List.filteri (fun i _ -> i <> index)
+              |> StringSet.unions
             in
-            ((optimised_lets, expr), e_unit) )
+            let let_cands = StringSet.remove_from_env let_cands fv_others in
+            let+ optimised_lets, expr' =
+              transform_expr_dps self n_args (Some index) let_cands expr
+            in
+            (* We enter this code if transforming the payload was successful.
+               Here, [expr'] is an expression that write the result of the
+               evaluation of [expr] in the destination (by induction hypothesis).
+               In that case, we replace the payload by [e_unit] and we return the
+               transformed expression along with the set of optimised lets. *)
+            ((optimised_lets, expr'), e_unit) )
           payload
       in
+      (* This code is only executed if the above was succesful, that is if one
+         of the payloads was successfuly transformed (we pick the first one).
+         In that case :
+         - We return the set of optimised away let-bindings directly.
+         - We then output the following code :
+           [[ let dst' = Cons (..., (), ...) in
+              dst.index <- dst' ;
+              let dst = dst' in
+              expr ]]
+           where expr is the expression that will write in the hole of the
+           destination. *)
       ( optimised_lets
       , e_let "dst'"
           ~equal:(ECons {cons; payload})
@@ -207,12 +246,14 @@ let rec transform_expr_dps self n_args first_cons index let_cands expr =
                 [e_write ~block:(e_var "dst") ~i:e_index ~to_:(e_var "dst'")]
             @@ e_let "dst" ~equal:(e_var "dst'") ~in_:expr ) )
   | EMatch {arg; branches} ->
+      (* We need to transform the branches. Each branch can be either
+         succesfully transformed, or plugged as-is in a write statement.
+         We consider that the transformation is a success if at least one branch
+         was succesfully transformed. *)
       let (had_a_succes, optimised_lets), branches =
         List.fold_left_map
           (fun (had_a_success, lets) (pat, expr) ->
-            match
-              transform_expr_dps self n_args first_cons index let_cands expr
-            with
+            match transform_expr_dps self n_args index let_cands expr with
             | Some (optimised_lets, expr) ->
                 ((true, StringSet.(optimised_lets + lets)), (pat, expr))
             | None ->
@@ -230,15 +271,21 @@ let rec transform_expr_dps self n_args first_cons index let_cands expr =
   | EWrite _
   | EPrimFunc _
   | EUnit ->
+      (* In all these cases, we fail. *)
       None
 
-let transform_expr_dps_let self n_args expr =
-  Option.map snd @@ transform_expr_dps self n_args true None Env.empty expr
+let transform_expr_dps self n_args expr =
+  expr |> transform_expr_dps self n_args None Env.empty |> Option.map snd
 
+(** [transform_expr self expr] is either [None] if no transformation was found,
+    or [Some (entry, dps)] where a call to [entry] has the same semantics as
+    call to [self] (in the context [let rec self = expr]). And [dps] is [expr]
+    in destination passing style, that is [dps dst i arg] writes [self arg] in
+    [dst.i]. *)
 let transform_expr self expr =
   match expr with
   | EFunc {args; body} ->
-      let+ transformed = transform_expr_dps_let self (List.length args) body in
+      let+ transformed = transform_expr_dps self (List.length args) body in
       let name_dps = self ^ "_dps" in
       let dps =
         let body =

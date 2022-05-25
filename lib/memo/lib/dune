@@ -1,0 +1,3 @@
+(library
+ (name memolib)
+ (public_name mlambda.memolib))
