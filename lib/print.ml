@@ -2,6 +2,8 @@ open PPrint
 open OCaml
 open Ast
 
+let or_empty p o = match o with Some v -> p v | None -> empty
+
 let ( ^-^ ) a b = a ^^ space ^^ b
 
 let arrow = !^"->"
@@ -47,10 +49,8 @@ let rec pattern p =
       primitive pr
   | PVar ident ->
       !^ident
-  | PTuple ps ->
-      parens (separate_map (comma ^^ break 1) pattern ps)
   | PCons {cons; payload} -> (
-      !^cons
+      or_empty ( !^ ) cons
       ^^
       match payload with
       | [] ->
@@ -100,7 +100,7 @@ let rec expr ?(context = false) e =
       !^"()"
   | ECons {cons; payload} -> (
       (if context then parens else Fun.id)
-      @@ !^cons
+      @@ or_empty ( !^ ) cons
       ^^
       match payload with
       | [] ->
@@ -110,15 +110,15 @@ let rec expr ?(context = false) e =
       | _ :: _ :: _ ->
           parens (separate_map (comma ^^ space) expr payload) )
   | ELet {var; value; is_rec; body_in} ->
-      (*if var = "_" then expr value ^-^ semi ^/^ expr body_in
-        else*)
-      group
-        ( !^"let"
-        ^-^ (if is_rec then !^"rec" ^^ space else empty)
-        ^^ !^var ^-^ equals
-        ^^ nest_break (expr value)
-        ^/^ !^"in" )
-      ^/^ expr body_in
+      if var = "_" then expr value ^-^ semi ^/^ expr body_in
+      else
+        group
+          ( !^"let"
+          ^-^ (if is_rec then !^"rec" ^^ space else empty)
+          ^^ !^var ^-^ equals
+          ^^ nest_break (expr value)
+          ^/^ !^"in" )
+        ^/^ expr body_in
   | EMatch {arg; branches} ->
       (if context then parens else Fun.id)
       @@ group (!^"match" ^^ nest_break (expr arg) ^/^ !^"with")
@@ -179,6 +179,10 @@ let string_of_env = to_string env
 let print_expr = to_channel expr
 
 let string_of_expr = to_string expr
+
+let print_pattern = to_channel pattern
+
+let string_of_pattern = to_string pattern
 
 let print_si = to_channel si
 

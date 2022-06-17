@@ -30,24 +30,38 @@ let rec expr env e =
       let n = n |> expr env |> get_int in
       VArray (Array.init n (fun _ -> VUnit))
   | EProj {arr; index} ->
+      print_endline "eval EProj" ;
       let arr = arr |> expr env |> get_array in
       let index = index |> expr env |> get_int in
-      arr.(index)
+      if index >= Array.length arr then
+        failwith
+          (sprintf "Index %i is out of bounds for array %s" index
+             (string_of_value (VArray arr)) )
+      else arr.(index)
   | EWrite {arr; index; value} ->
       let arr = arr |> expr env |> get_array in
       let index = index |> expr env |> get_int in
       let value = expr env value in
-      arr.(index) <- value ; VUnit
+      if index >= Array.length arr then
+        failwith
+          (sprintf "Index %i is out of bounds for array %s" index
+             (string_of_value (VArray arr)) )
+      else arr.(index) <- value ;
+      VUnit
   | EApply {func; args} ->
       apply env func args
   | EFunc {args; body} ->
       VFunc {env; args; body}
   | EPrimFunc (name, func) ->
       VPrFunc (name, func)
-  | ECons {cons; payload= []} ->
+  | ECons {cons= Some cons; payload= []} ->
       VCons cons
-  | ECons {cons; payload} ->
+  | ECons {cons= None; payload= []} ->
+      VUnit
+  | ECons {cons= Some cons; payload} ->
       VArray (VCons cons :: (payload |> List.map (expr env)) |> Array.of_list)
+  | ECons {cons= None; payload} ->
+      VArray (payload |> List.map (expr env) |> Array.of_list)
   | EPrim pr ->
       prim pr
   | EMatch {arg; branches} -> (
@@ -59,6 +73,8 @@ let rec expr env e =
           branches
       with
       | None ->
+          Print.print_value stdout arg ;
+          Print.print_expr stdout e ;
           failwith "match failed"
       | Some v ->
           v )
@@ -70,9 +86,9 @@ and pattern env value pat =
   | PVar ident, value ->
       let env = env_add ident value env in
       Some env
-  | PCons {cons; payload= []}, VCons cons' when cons = cons' ->
+  | PCons {cons= Some cons; payload= []}, VCons cons' when cons = cons' ->
       Some env
-  | PTuple li, VArray arr ->
+  | PCons {cons= None; payload= li}, VArray arr ->
       let li' = Array.to_list arr in
       let rec aux li li' env =
         match (li, li') with
@@ -84,9 +100,7 @@ and pattern env value pat =
             None
       in
       aux li li' env
-  | PTuple _, _ ->
-      None
-  | PCons {cons; payload}, VArray arr -> (
+  | PCons {cons= Some cons; payload}, VArray arr -> (
       let li' = Array.to_list arr in
       match li' with
       | [] ->

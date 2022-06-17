@@ -30,7 +30,7 @@ type ('a, 'b) decorator = ('a -> 'b) -> 'a -> 'b
 
 type ('a, 'b) rec_decorator = (('a -> 'b) -> 'a -> 'b) -> 'a -> 'b
 
-let index ?(start = 0) bound f =
+let tabulate ?(start = 0) bound f =
   let cache = Array.make bound None in
   fun arg ->
     let index = arg - start in

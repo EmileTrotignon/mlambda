@@ -8,8 +8,7 @@ and pattern =
   | PAny
   | PPrim of primitive
   | PVar of ident
-  | PTuple of pattern list
-  | PCons of {cons: cons; payload: pattern list}
+  | PCons of {cons: cons option; payload: pattern list}
 
 and expr =
   | EVar of ident
@@ -20,7 +19,8 @@ and expr =
   | EProj of {arr: expr; index: expr}
   | EWrite of {arr: expr; index: expr; value: expr}
   | EUnit
-  | ECons of {cons: cons; payload: expr list}
+ (* cons is optionnal because tuples do not have a cons *)
+  | ECons of {cons: cons option; payload: expr list}
   | ELet of {var: ident; is_rec: bool; value: expr; body_in: expr}
   | EMatch of {arg: expr; branches: (pattern * expr) list}
   | EPrimFunc of string * (value list -> value)

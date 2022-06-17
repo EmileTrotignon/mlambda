@@ -10,6 +10,10 @@ val print_expr : out_channel -> Ast.expr -> unit
 
 val string_of_expr : Ast.expr -> string
 
+val print_pattern : out_channel -> Ast.pattern -> unit
+
+val string_of_pattern : Ast.pattern -> string
+
 val print_si : out_channel -> Ast.struct_item -> unit
 
 val string_of_si : Ast.struct_item -> string

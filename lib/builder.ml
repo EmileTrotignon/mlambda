@@ -12,7 +12,7 @@ let p_var ident = PVar ident
 
 let p_prim prim = PPrim prim
 
-let p_tuple li = PTuple li
+let p_tuple li = PCons {cons= None; payload= li}
 
 let p_cons ?(payload = []) cons = PCons {cons; payload}
 
@@ -67,7 +67,9 @@ let e_false = e_prim (pr_bool false)
 
 let e_bool b = e_prim (pr_bool b)
 
-let e_cons ?(payload = []) cons = ECons {cons; payload}
+let e_cons ?(payload = []) cons = ECons {cons= Some cons; payload}
+
+let e_tuple payload = ECons {cons= None; payload}
 
 let rec e_list li =
   match li with

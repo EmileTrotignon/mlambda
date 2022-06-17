@@ -9,6 +9,9 @@ let rec find_mapi_aux i f li =
 
 let find_mapi f li = find_mapi_aux 0 f li
 
+let fold_lefti f init li =
+  fold_left (fun (i, acc) ele -> (i + 1, f i acc ele)) (0,init) li |> snd
+
 let rec fold_left_mapi_aux i f acc li =
   match li with
   | [] ->

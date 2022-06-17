@@ -43,3 +43,14 @@ let rec map_double_cond_let = fun f p li ->
     :: ( f ele
        , if p ele then :: (f ele, li)
          else li) )
+
+let rec partition_map = fun f li ->
+  match li with
+  | [] -> ([], [])
+  | :: (x, li) -> (
+    let e = f x in
+    match partition_map f li with
+    | (left, right) -> (
+      match e with
+      | Left (v) -> (:: (v, left), right)
+      | Right (v) -> (left, :: (v, right)) ) )

@@ -54,12 +54,12 @@ let primitive ==
 let pattern :=
 | ~=atomic_pattern; <>
 | UNDERSCORE; {PAny}
-| cons=cons; LPAR; payload=separated_list(COMMA, pattern); RPAR; {PCons {cons; payload}}
-| cons=cons; {PCons{cons; payload=[]}}
+| cons=cons; LPAR; payload=separated_list(COMMA, pattern); RPAR; {PCons {cons=Some cons; payload}}
+| cons=cons; {PCons{cons=Some cons; payload=[]}}
 
 let atomic_pattern :=
 | LPAR; ~=pattern; RPAR; <>
-| LPAR; ~=separated_twolong_list(COMMA, pattern); RPAR; < PTuple >
+| LPAR; payload=separated_twolong_list(COMMA, pattern); RPAR; { p_tuple payload }
 | ~=primitive; < PPrim >
 | ~=ident; < PVar >
 
@@ -95,8 +95,8 @@ let if_expr :=
 
 let cons_expr :=
 | ~=apply_expr; <>
-| cons=cons; { ECons {cons; payload=[]} }
-| cons=cons; LPAR; payload=separated_nonempty_list(COMMA, expr); RPAR; { ECons {cons; payload} }
+| cons=cons; { ECons {cons=Some cons; payload=[]} }
+| cons=cons; LPAR; payload=separated_nonempty_list(COMMA, expr); RPAR; { ECons {cons = Some cons; payload} }
 
 let apply_expr :=
 | ~=proj_expr; <>
@@ -115,6 +115,7 @@ let proj_expr :=
 let paren_expr :=
 | ~=atomic_expr; <>
 | LPAR; ~=expr; RPAR; <>
+| LPAR; payload=separated_twolong_list(COMMA, expr); RPAR; { e_tuple payload }
 
 let atomic_expr :=
 | LPARRPAR; { EUnit }
