@@ -1,6 +1,5 @@
 %{ (* -*- tuareg -*- *)
 open Ast
-open Builder
 
 %}
 %token<string> LOWERCASE_ID
@@ -59,7 +58,7 @@ let pattern :=
 
 let atomic_pattern :=
 | LPAR; ~=pattern; RPAR; <>
-| LPAR; payload=separated_twolong_list(COMMA, pattern); RPAR; { p_tuple payload }
+| LPAR; payload=separated_twolong_list(COMMA, pattern); RPAR; { Pattern.tuple payload }
 | ~=primitive; < PPrim >
 | ~=ident; < PVar >
 
@@ -72,7 +71,7 @@ let let_expr :=
 | LET; var=ident; EQUAL; value=expr; IN; body_in=expr; { ELet {var; is_rec=false; value; body_in} }
 
 let seq_expr :=
-| e1=fun_expr; SEMI; e2=expr; { e_seq e1 e2 }
+| e1=fun_expr; SEMI; e2=expr; { Expr.seq e1 e2 }
 
 let fun_expr :=
 | ~=match_expr; <>
@@ -91,7 +90,7 @@ let write_expr :=
 
 let if_expr :=
 | ~=cons_expr; <>
-| IF; cond=if_expr; THEN; then_=if_expr; ELSE; else_=cons_expr; { e_if cond ~then_ ~else_ }
+| IF; cond=if_expr; THEN; then_=if_expr; ELSE; else_=cons_expr; { Expr.if_ cond ~then_ ~else_ }
 
 let cons_expr :=
 | ~=apply_expr; <>
@@ -115,7 +114,7 @@ let proj_expr :=
 let paren_expr :=
 | ~=atomic_expr; <>
 | LPAR; ~=expr; RPAR; <>
-| LPAR; payload=separated_twolong_list(COMMA, expr); RPAR; { e_tuple payload }
+| LPAR; payload=separated_twolong_list(COMMA, expr); RPAR; { Expr.tuple payload }
 
 let atomic_expr :=
 | LPARRPAR; { EUnit }

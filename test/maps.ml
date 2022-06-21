@@ -1,5 +1,4 @@
 open Mlambda
-open Builder
 open Printf
 open Option_monad
 
@@ -11,7 +10,7 @@ let maps_tmc = maps_tmc
 
 let maps_tmcc = Tmc.program_cons maps_tmc
 
-let () = print_program stdout maps_tmcc
+let () = print_program stdout maps_tmc
 
 let rec int_list_of_value v =
   (* print_value stdout v ; *)
@@ -56,83 +55,83 @@ let test_is_pair i () =
   Alcotest.(check bool)
     "same bools"
     (i mod 2 = 0)
-    (Eval.expr (e_apply (e_var "is_pair") [e_int i]) |> Ast.get_bool)
+    (Eval.expr Expr.(apply (var "is_pair") [int i]) |> Ast.get_bool)
 
 let test_map () =
   Alcotest.(check (list int))
     "same lists" [2; 4; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map")
-           [e_var "double"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map")
+           [var "double"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_map_double () =
   Alcotest.(check (list int))
     "same lists" [2; 2; 4; 4; 6; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map_double")
-           [e_var "double"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map_double")
+           [var "double"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_map_double_cond () =
   Alcotest.(check (list int))
     "same lists" [2; 4; 4; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map_double_cond")
-           [e_var "double"; e_var "is_pair"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map_double_cond")
+           [var "double"; var "is_pair"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_write () =
   Alcotest.(check int)
     "same int" 1
     ( Eval.expr
-        (e_let "arr"
-           ~equal:(e_alloc ~size:(e_int 2))
+        Expr.(let_ "arr"
+           ~equal:(alloc ~size:(int 2))
            ~in_:
-             (e_seqs
-                [e_write ~block:(e_var "arr") ~i:(e_int 0) ~to_:(e_int 1)]
-                (e_proj (e_var "arr") (e_int 0)) ) )
+             (seqs
+                [write ~block:(var "arr") ~i:(int 0) ~to_:(int 1)]
+                (proj (var "arr") (int 0)) ) )
     |> Ast.get_int )
 
 let test_map_tmc () =
   Alcotest.(check (list int))
     "same lists" [2; 4; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map")
-           [e_var "double"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map")
+           [var "double"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_map_let_tmc () =
   Alcotest.(check (list int))
     "same lists" [2; 4; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map_let")
-           [e_var "double"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map_let")
+           [var "double"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_map_double_tmc () =
   Alcotest.(check (list int))
     "same lists" [2; 2; 4; 4; 6; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map_double")
-           [e_var "double"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map_double")
+           [var "double"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_map_double_cond_tmc () =
   Alcotest.(check (list int))
     "same lists" [2; 4; 4; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply (e_var "map_double_cond")
-           [e_var "double"; e_var "is_pair"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply (var "map_double_cond")
+           [var "double"; var "is_pair"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_map_double_cond_let_tmc () =
   Alcotest.(check (list int))
     "same lists" [2; 4; 4; 6]
     ( Eval.expr ~env:maps_tmc
-        (e_apply
-           (e_var "map_double_cond_let")
-           [e_var "double"; e_var "is_pair"; e_list [e_int 1; e_int 2; e_int 3]] )
+        Expr.(apply
+           (var "map_double_cond_let")
+           [var "double"; var "is_pair"; list [int 1; int 2; int 3]] )
     |> int_list_of_value )
 
 let test_partition_map () =
@@ -142,14 +141,15 @@ let test_partition_map () =
       "same lists pair"
       ([2], [1; 3])
       ( Eval.expr ~env:maps_tmcc
-          (e_apply (e_var "partition_map")
-             [ e_func ~args:["ele"]
-                 ~body:
-                   (e_if
-                      (e_apply (e_var "is_pair") [e_var "ele"])
-                      ~then_:(e_cons "Left" ~payload:[e_var "ele"])
-                      ~else_:(e_cons "Right" ~payload:[e_var "ele"]) )
-             ; e_list [e_int 1; e_int 2; e_int 3] ] )
+          Expr.(
+            apply (var "partition_map")
+              [ func ~args:["ele"]
+                  ~body:
+                    (if_
+                       (apply (var "is_pair") [var "ele"])
+                       ~then_:(cons "Left" ~payload:[var "ele"])
+                       ~else_:(cons "Right" ~payload:[var "ele"]) )
+              ; list [int 1; int 2; int 3] ])
       |> int_list_pair_of_value ))
 
 let () =

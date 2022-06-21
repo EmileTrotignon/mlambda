@@ -1,4 +1,4 @@
-include Map.Make (String)
+include Map.Make (Stdlib.String)
 
 let add key value env = env |> remove key |> add key value
 

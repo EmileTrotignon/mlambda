@@ -206,7 +206,7 @@ let log = open_out "log_print"
 
 let prim_env =
   program_ Env.empty
-    Builder.
+    Struct_item.
       [ prim_func_def_ar2 "add" (fun v1 v2 ->
             let v1 = get_int v1 in
             let v2 = get_int v2 in
