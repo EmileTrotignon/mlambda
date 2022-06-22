@@ -1,0 +1,10 @@
+let rec partition_map = fun f li ->
+  match li with
+  | [] -> ([], [])
+  | :: (x, li) -> (
+    let e = f x in
+    match partition_map f li with
+    | (left, right) -> (
+      match e with
+      | Left (v) -> (:: (v, left), right)
+      | Right (v) -> (left, :: (v, right)) ) )

@@ -3,6 +3,7 @@ module Expr = Expr
 module Pattern = Pattern
 module Primitive = Primitive
 module Struct_item = Struct_item
+module Program = Program
 include Print
 module Eval = Eval
 module Tmc = Tmc

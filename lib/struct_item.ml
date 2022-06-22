@@ -21,3 +21,10 @@ let prim_func_def_ar2 name func =
         func v1 v2
     | _ ->
         failwith (Printf.sprintf "%s expects 2 arguments" name) )
+
+let is_tailrec (si : t) =
+  match si with
+  | Binding {name; is_rec; body} ->
+      is_rec || Expr.is_tailrec name body
+  | MutualRecBindings bds ->
+      List.for_all (fun (name, body) -> Expr.is_tailrec name body) bds

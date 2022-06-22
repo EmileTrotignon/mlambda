@@ -58,6 +58,42 @@ let if_ cond ~then_ ~else_ =
       [ (Pattern.prim (Primitive.bool true), then_)
       ; (Pattern.prim (Primitive.bool false), else_) ]
 
+let rec is_tailrec self (body : t) =
+  match body with
+  | EVar _ ->
+      true
+  | EFunc {args; body} ->
+      if List.mem self args then true else is_tailrec self body
+  | EApply {args; _} ->
+      List.for_all (fun expr -> not (String.Set.mem self (fv expr))) args
+  | EAlloc i ->
+      not (String.Set.mem self (fv i))
+  | EPrim _ ->
+      true
+  | EProj {arr; index} ->
+      (not (String.Set.mem self (fv arr)))
+      && not (String.Set.mem self (fv index))
+  | EWrite {arr; index; value} ->
+      (not (String.Set.mem self (fv arr)))
+      && (not (String.Set.mem self (fv index)))
+      && not (String.Set.mem self (fv value))
+  | EUnit ->
+      true
+  | ECons {payload; _} ->
+      List.for_all (fun expr -> not (String.Set.mem self (fv expr))) payload
+  | ELet {var; is_rec; value; body_in} ->
+      assert (not is_rec) ;
+      (not (String.Set.mem self (fv value)))
+      && if var = self then true else is_tailrec self body_in
+  | EMatch {arg; branches} ->
+      (not (String.Set.mem self (fv arg)))
+      && List.for_all
+           (fun (pat, expr) ->
+             String.Set.mem self (Pattern.vars pat) || is_tailrec self expr )
+           branches
+  | EPrimFunc (_, _) ->
+      true
+
 let let_ ?(is_rec = false) var ~equal ~in_ =
   ELet {var; is_rec; value= equal; body_in= in_}
 
