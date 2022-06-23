@@ -22,3 +22,18 @@ let prim prim = PPrim prim
 let tuple li = PCons {cons= None; payload= li}
 
 let cons ?(payload = []) cons = PCons {cons; payload}
+
+let rec eq p1 p2 =
+  match (p1, p2) with
+  | PAny, PAny ->
+      true
+  | PPrim prim, PPrim prim' ->
+      Primitive.(prim = prim')
+  | PVar var, PVar var' ->
+      String.equal var var'
+  | PCons {cons; payload}, PCons {cons= cons'; payload= payload'} ->
+      Option.equal String.equal cons cons' && List.equal eq payload payload'
+  | _, _ ->
+      false
+
+let ( = ) = eq

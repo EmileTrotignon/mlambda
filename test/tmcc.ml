@@ -2,12 +2,9 @@ open Mlambda
 open Helpers
 
 let env =
-  "partition_map.mlambda" |> Parse.file |> Tmc.program_cons
-  |.> print_program stdout
+  "partition_map.mlambda" |> Parse.file |> Tmcc.program |.> print_program stdout
 
-let tailrecness () =
-  List.iter (tailrecness env)
-    ["partition_map"]
+let tailrecness () = List.iter (tailrecness env) ["partition_map"]
 
 let test_partition_map () =
   Alcotest.(

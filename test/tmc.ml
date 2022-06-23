@@ -1,7 +1,9 @@
 open Mlambda
 open Helpers
 
-let env = Parse.file "maps.mlambda" |> Tmc.program |.> print_program stdout
+let env =
+  Parse.file "maps.mlambda" |> Inline.program |> Tmc.program
+  |.> print_program stdout
 
 let tailrecness () =
   List.iter (tailrecness env)

@@ -7,5 +7,7 @@ module Program = Program
 include Print
 module Eval = Eval
 module Tmc = Tmc
+module Tmcc = Tmcc
+module Inline = Inline
 module Parse = Parse
 module Option_monad = Option_monad
