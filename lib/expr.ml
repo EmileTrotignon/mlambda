@@ -81,8 +81,9 @@ let rec is_tailrec self (body : t) =
       true
   | ECons {payload; _} ->
       List.for_all (fun expr -> not (String.Set.mem self (fv expr))) payload
-  | ELet {var; is_rec; value; body_in} ->
-      assert (not is_rec) ;
+  | ELet {var; is_rec= true; _} when var = self ->
+      true
+  | ELet {var; is_rec= _; value; body_in} ->
       (not (String.Set.mem self (fv value)))
       && if var = self then true else is_tailrec self body_in
   | EMatch {arg; branches} ->
@@ -91,7 +92,7 @@ let rec is_tailrec self (body : t) =
            (fun (pat, expr) ->
              String.Set.mem self (Pattern.vars pat) || is_tailrec self expr )
            branches
-  | EPrimFunc (_, _) ->
+  | EPrimFunc _ ->
       true
 
 let let_ ?(is_rec = false) var ~equal ~in_ =
