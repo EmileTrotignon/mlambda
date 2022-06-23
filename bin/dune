@@ -1,4 +1,0 @@
-(executable
- (public_name mlambda)
- (name main)
- (libraries mlambda))
