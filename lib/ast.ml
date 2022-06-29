@@ -41,22 +41,3 @@ and struct_item =
 
 type program = struct_item list
 
-let get_int = function VInt i -> i | _ -> failwith "Not an integer"
-
-let get_array = function VArray arr -> arr | _ -> failwith "Not an array"
-
-let get_bool = function VBool b -> b | _ -> failwith "Not a bool"
-
-let get_unit = function VUnit -> () | _ -> failwith "Not a unit"
-
-type func =
-  | Prim of string * (value list -> value)
-  | Lang of (value Env.t * ident list * expr)
-
-let get_func = function
-  | VFunc {env; args; body} ->
-      Lang (env, args, body)
-  | VPrFunc (name, func) ->
-      Prim (name, func)
-  | _ ->
-      failwith "Not a function"

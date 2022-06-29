@@ -11,4 +11,4 @@ let test_write () =
               (seqs
                  [write ~block:(var "arr") ~i:(int 0) ~to_:(int 1)]
                  (proj (var "arr") (int 0)) ))
-    |> Ast.get_int )
+    |> Value.int_exn )

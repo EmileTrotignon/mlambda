@@ -8,7 +8,7 @@ open Ast
 %token<string> STRING
 %token<bool> BOOL
 
-%token LET REC IN
+%token LET REC AND IN
 %token FUN
 
 %token UNDERSCORE
@@ -68,7 +68,7 @@ let expr :=
 | ~=fun_expr; <>
 
 let let_expr :=
-| LET; var=ident; EQUAL; value=expr; IN; body_in=expr; { ELet {var; is_rec=false; value; body_in} }
+| LET; bds=separated_list(AND, separated_pair(pattern, EQUAL, expr)); IN; in_=expr; { Expr.let_and bds ~in_ }
 
 let seq_expr :=
 | e1=fun_expr; SEMI; e2=expr; { Expr.seq e1 e2 }

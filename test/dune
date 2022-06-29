@@ -1,6 +1,6 @@
 (test
  (name test)
-
  (libraries mlambda alcotest)
  (deps
-  (file maps.mlambda)))
+  (file maps.mlambda)
+  (file partition_map.mlambda)))

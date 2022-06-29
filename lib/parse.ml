@@ -14,6 +14,8 @@ let _print_token (tok : Parser.token) =
       print_string "LET"
   | REC ->
       print_string "REC"
+  | AND ->
+      print_string "AND"
   | IN ->
       print_string "IN"
   | FUN ->

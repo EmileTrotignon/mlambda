@@ -13,6 +13,18 @@ let%memo rec vars (pat : pattern) =
   | PCons {cons= _; payload} ->
       payload |> List.map vars |> String.Set.unions
 
+let rec vars_numbered i pattern =
+  match pattern with
+  | PVar var ->
+      (i + 1, Env.singleton var i)
+  | PAny | PPrim _ ->
+      (i, Env.empty)
+  | PCons {payload; _} ->
+      let i, payload_env = List.fold_left_map vars_numbered i payload in
+      (i, List.fold_left Env.union Env.empty payload_env)
+
+let vars_numbered p = p |> vars_numbered 0 |> snd
+
 let any = PAny
 
 let var ident = PVar ident

@@ -3,8 +3,29 @@ let rec partition_map = fun f li ->
   | [] -> ([], [])
   | :: (x, li) -> (
     let e = f x in
-    match partition_map f li with
-    | (left, right) -> (
-      match e with
-      | Left (v) -> (:: (v, left), right)
-      | Right (v) -> (left, :: (v, right)) ) )
+    let (left, right) = partition_map f li in
+    match e with
+    | Left (v) -> (:: (v, left), right)
+    | Right (v) -> (left, :: (v, right)) )
+
+let rec partition_map_twister = fun f li ->
+  match li with
+  | [] -> ([], [])
+  | :: (x, li) -> (
+    let e = f x in
+    let (left, right) = partition_map_twister f li in
+    match e with
+    | Left (v) -> (:: (v, right), left)
+    | Right (v) -> (right, :: (v, left)) )
+
+
+let rec partition_map_deep = fun f li ->
+  match li with
+  | [] -> ([], ([], []))
+  | :: (x, li) -> (
+    let e = f x in
+    let (left, (center, right)) = partition_map_deep f li in
+    match e with
+    | Left (v) -> (:: (v, left), (center, right))
+    | Center (v) -> (left, (:: (v, center), right))
+    | Right (v) -> (left, (center, :: (v, right))) )

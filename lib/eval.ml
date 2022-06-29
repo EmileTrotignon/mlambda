@@ -27,20 +27,20 @@ let rec expr env e =
       let env = env_add var value env in
       expr env body_in
   | EAlloc n ->
-      let n = n |> expr env |> get_int in
+      let n = n |> expr env |> Value.int_exn in
       VArray (Array.init n (fun _ -> VUnit))
   | EProj {arr; index} ->
       print_endline "eval EProj" ;
-      let arr = arr |> expr env |> get_array in
-      let index = index |> expr env |> get_int in
+      let arr = arr |> expr env |> Value.array_exn in
+      let index = index |> expr env |> Value.int_exn in
       if index >= Array.length arr then
         failwith
           (sprintf "Index %i is out of bounds for array %s" index
              (string_of_value (VArray arr)) )
       else arr.(index)
   | EWrite {arr; index; value} ->
-      let arr = arr |> expr env |> get_array in
-      let index = index |> expr env |> get_int in
+      let arr = arr |> expr env |> Value.array_exn in
+      let index = index |> expr env |> Value.int_exn in
       let value = expr env value in
       if index >= Array.length arr then
         failwith
@@ -145,7 +145,7 @@ and prim prim =
       VString s
 
 and apply env func args =
-  let func = func |> expr env |> get_func in
+  let func = func |> expr env |> Value.func_exn in
   match func with
   | Lang (env_func, pat_args, body) ->
       apply_lang pat_args body args env env_func
@@ -208,26 +208,26 @@ let prim_env =
   program_ Env.empty
     Struct_item.
       [ prim_func_def_ar2 "add" (fun v1 v2 ->
-            let v1 = get_int v1 in
-            let v2 = get_int v2 in
+            let v1 = Value.int_exn v1 in
+            let v2 = Value.int_exn v2 in
             VInt (v1 + v2) )
       ; prim_func_def_ar2 "mod" (fun v1 v2 ->
-            let v1 = get_int v1 in
-            let v2 = get_int v2 in
+            let v1 = Value.int_exn v1 in
+            let v2 = Value.int_exn v2 in
             VInt (v1 mod v2) )
       ; prim_func_def_ar1 "is_pair" (fun v ->
-            let v = get_int v in
+            let v = Value.int_exn v in
             VBool (v mod 2 = 0) )
       ; prim_func_def_ar2 "sub" (fun v1 v2 ->
-            let v1 = get_int v1 in
-            let v2 = get_int v2 in
+            let v1 = Value.int_exn v1 in
+            let v2 = Value.int_exn v2 in
             VInt (v1 - v2) )
       ; prim_func_def_ar2 "mult" (fun v1 v2 ->
-            let v1 = get_int v1 in
-            let v2 = get_int v2 in
+            let v1 = Value.int_exn v1 in
+            let v2 = Value.int_exn v2 in
             VInt (v1 * v2) )
       ; prim_func_def_ar1 "double" (fun v ->
-            let v = get_int v in
+            let v = Value.int_exn v in
             VInt (2 * v) )
       ; prim_func_def_ar1 "print" (fun v -> print_value log v ; VUnit) ]
 

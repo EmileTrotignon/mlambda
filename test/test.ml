@@ -17,5 +17,7 @@ let () =
           ; test_case "Map double cond let tmc" `Quick map_double_cond_let ] )
     ; ( "Maps tmcc"
       , Tmcc.
-          [ test_case "Tmc tailrecness" `Quick tailrecness
-          ; test_case "Test is_pair" `Quick test_partition_map ] ) ]
+          [ (*test_case "Tmc tailrecness" `Quick tailrecness*)
+           test_case "Test partition_map" `Quick partition_map
+          ; test_case "Test partition_map_twister" `Quick partition_map_twister
+          ] ) ]

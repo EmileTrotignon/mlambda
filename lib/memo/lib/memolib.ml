@@ -68,7 +68,7 @@ myfunc=mydec(myfunc)
 let memo_rec (module Table : ObjTable) f =
   let cache = Table.create 256 in
   let rec self arg =
-    let arg_obj = Obj.repr arg in
+    let arg_obj = Obj.repr arg in 
     match Table.find_opt cache arg_obj with
     | None ->
         let result = f self arg in

@@ -9,42 +9,44 @@ let index_name_of_int i = "index" ^ string_of_int i
 
 type index = Int of int | Variable of string
 
-let rec transform_expr_dps_after_construct dst_name index pvars expr =
+let expr_of_index = Expr.(function Int i -> int i | Variable v -> var v)
+
+let rec transform_expr_dps_after_construct dst_name index rec_vars expr =
   print_endline "transform_expr_dps_after_construct" ;
   print_expr stdout expr ;
   let dst'_name = dst_name ^ "'" in
-  let e_index =
-    match index with Variable name -> Expr.var name | Int i -> Expr.int i
-  in
+  let e_index = expr_of_index index in
   match expr with
-  | EVar var when String.Set.mem var pvars ->
-      Some (String.Set.singleton var, dst_name, index, Fun.id)
+  | EVar var ->
+      let* i = Env.find_opt var rec_vars in
+      Some ((var, i), Expr.(tuple [var dst_name; e_index]))
   | ECons {cons; payload} ->
-      let+ (pvars_used, dst_name, index, (expr : expr -> expr)), payload =
+      let+ (var_used, (expr : expr)), payload =
         List.find_and_replace_i
           (fun index expr ->
             (* Here we use the current index, because if we manage to transform
                [expr] into [expr'], [expr'] should write in [dst.index]. This
                does not affect success *)
-            let pvars =
+            let rec_vars =
               String.Set.(
-                pvars
-                - unions
-                    (List.mapi
-                       (fun index' expr ->
-                         if index' = index then empty else Expr.fv expr )
-                       payload ))
+                remove_from_env rec_vars
+                  (unions
+                     (List.mapi
+                        (fun index' expr ->
+                          if index' = index then empty else Expr.fv expr )
+                        payload ) ))
             in
             let index = index + if Option.is_some cons then 1 else 0 in
-            let+ pvars_used, dst_name, index, (expr' : expr -> expr) =
-              transform_expr_dps_after_construct dst_name (Int index) pvars expr
+            let+ pvars_used, expr' =
+              transform_expr_dps_after_construct dst_name (Int index) rec_vars
+                expr
             in
             (* We enter this code if transforming the payload was successful.
                Here, [expr'] is an expression that write the result of the
                evaluation of [expr] in the destination (by induction hypothesis).
                In that case, we replace the payload by [e_unit] and we return the
                transformed expression along with the set of optimised lets. *)
-            ((pvars_used, dst_name, index, expr'), Expr.unit) )
+            ((pvars_used, expr'), Expr.unit) )
           payload
       in
       (* This code is only executed if the above was succesful, that is if one
@@ -58,32 +60,27 @@ let rec transform_expr_dps_after_construct dst_name index pvars expr =
               expr ]]
            where expr is the expression that will write in the hole of the
            destination. *)
-      ( pvars_used
-      , dst_name
-      , index
-      , fun expr_arg ->
-          let cons_ = cons in
-          Expr.(
-            let_ dst'_name
-              ~equal:(ECons {cons= cons_; payload})
-              ~in_:
-                ( seqs
-                    [write ~block:(var dst_name) ~i:e_index ~to_:(var dst'_name)]
-                @@ let_ dst_name ~equal:(var dst'_name) ~in_:(expr expr_arg) ))
-      )
+      ( var_used
+      , let cons_ = cons in
+        Expr.(
+          let_ dst'_name
+            ~equal:(ECons {cons= cons_; payload})
+            ~in_:
+              ( seqs
+                  [write ~block:(var dst_name) ~i:e_index ~to_:(var dst'_name)]
+              @@ let_ dst_name ~equal:(var dst'_name)
+                   ~in_:(*let_ index_name ~equal:e_index ~in_:*) expr )) )
   | _ ->
       None
 
-let expr_dps_after_construct dst_name index pvars expr =
-  let r = transform_expr_dps_after_construct dst_name index pvars expr in
+let expr_dps_after_construct dst_name index rec_vars expr =
+  let r = transform_expr_dps_after_construct dst_name index rec_vars expr in
   ( match r with
   | None ->
-      print_endline "failed transform_expr_dps_after_construct"
+      print_endline "failed expr_dps_after_construct"
   | Some _ ->
-      print_endline "success transform_expr_dps_after_construct" ) ;
+      print_endline "success expr_dps_after_construct" ) ;
   r
-
-let e_index = function Int i -> Expr.int i | Variable v -> Expr.var v
 
 let n_dsts n = List.init n (fun i -> (dst_name_of_int i, index_name_of_int i))
 
@@ -93,40 +90,45 @@ let rec expr_dps_after_destruct self args destruct_pattern expr =
   | ( PCons {cons= pcons; payload= ppayload}
     , ECons {cons= econs; payload= epayload} )
     when econs = pcons && List.length ppayload = List.length epayload ->
-      let pvars = Pattern.vars destruct_pattern in
-      let (_success, _pvars, fexpr), destinations =
+      let rec_vars = Pattern.vars_numbered destruct_pattern in
+      let (_rec_vars, bds), destinations =
         List.fold_left_mapi
-          (fun i (_success, pvars, fexpr) ele ->
+          (fun i (rec_vars, bds) ele ->
             let dst_name = dst_name_of_int i
             and index_name = index_name_of_int i in
             match
-              expr_dps_after_construct dst_name (Variable index_name) pvars ele
+              expr_dps_after_construct dst_name (Variable index_name) rec_vars
+                ele
             with
             | None ->
-                ( ( true
-                  , pvars
-                  , fun (aexpr : expr) ->
-                      fexpr
-                        Expr.(
-                          seq
-                            (write ~block:(var dst_name) ~i:(var index_name)
-                               ~to_:ele )
-                            aexpr) )
+                ( ( rec_vars
+                  , ( Pattern.any
+                    , Expr.(
+                        seq
+                          (write ~block:(var dst_name) ~i:(var index_name)
+                             ~to_:ele )
+                          unit) )
+                    :: bds )
                 , (dst_name, Variable index_name) )
-            | Some (pvars_used, dst_name, index, fexpr') ->
-                ( ( true
-                  , String.Set.(pvars - pvars_used)
-                  , fun aexpr -> fexpr (fexpr' aexpr) )
-                , (dst_name, index) ) )
-          (false, pvars, Fun.id) epayload
+            | Some ((var_used, i_arg), expr') ->
+                ( ( Env.(remove var_used rec_vars)
+                  , ( Pattern.(
+                        tuple
+                          [ var (dst_name_of_int i_arg)
+                          ; var (index_name_of_int i_arg) ])
+                    , expr' )
+                    :: bds )
+                , (dst_name, Variable index_name) ) )
+          (rec_vars, []) epayload
       in
       let dst_args =
         List.fold_right
           (fun (dst_name, index) acc ->
-            Expr.var dst_name :: e_index index :: acc )
+            Expr.var dst_name :: expr_of_index index :: acc )
           destinations []
       in
-      Some (fexpr Expr.(apply (var (self ^ "_dps")) (dst_args @ args)))
+      Some
+        Expr.(let_and bds ~in_:(apply (var (self ^ "_dps")) (dst_args @ args)))
   | _, ELet {var; is_rec; value; body_in} ->
       let+ body_in =
         expr_dps_after_destruct self args destruct_pattern body_in
@@ -151,39 +153,9 @@ let expr_dps_after_destruct self args destruct_pattern expr =
   let r = expr_dps_after_destruct self args destruct_pattern expr in
   ( match r with
   | None ->
-      print_endline "failed transform_expr_dps_after_destruct"
+      print_endline "failed expr_dps_after_destruct"
   | Some _ ->
-      print_endline "success transform_expr_dps_after_destruct" ) ;
-  r
-
-let prim_eq pr1 pr2 =
-  match (pr1, pr2) with
-  | PrString str, PrString str' ->
-      String.equal str str'
-  | PrInt i, PrInt i' ->
-      Int.equal i i'
-  | PrBool b, PrBool b' ->
-      Bool.equal b b'
-  | _, _ ->
-      false
-
-let rec pat_eq p1 p2 =
-  match (p1, p2) with
-  | PAny, PAny ->
-      true
-  | PPrim prim, PPrim prim' ->
-      prim_eq prim prim'
-  | PVar var, PVar var' ->
-      String.equal var var'
-  | PCons {cons; payload}, PCons {cons= cons'; payload= payload'} ->
-      Option.equal String.equal cons cons' && List.equal pat_eq payload payload'
-  | _, _ ->
-      false
-
-let _pat_eq p1 p2 =
-  let r = pat_eq p1 p2 in
-  printf "%s and %s are %s\n" (string_of_pattern p1) (string_of_pattern p2)
-    (if r then "equivalent" else "not equivalent") ;
+      print_endline "success expr_dps_after_destruct" ) ;
   r
 
 type cons_desc = {cons: string option; arity: int}
@@ -228,9 +200,12 @@ let rec expr_dps_before_destruct self n_args expr =
         let* cons_desc = cons_desc_of_pat pattern in
         match expr_dps_after_destruct self args pattern expr with
         | Some expr ->
+            print_endline "/!\\ => got some 123" ;
+            print_expr stdout expr ;
             Some (cons_desc, expr)
         | None ->
-            print_endline "got none" ; None )
+            print_endline "got none 123" ;
+            None )
     | EMatch {arg; branches} ->
         print_endline "EMatch {arg; branches} ->" ;
         let cons_desc, branches =
@@ -255,13 +230,13 @@ let rec expr_dps_before_destruct self n_args expr =
     | _ ->
         None
   in
-  ( match r with
-  | None ->
-      print_endline "failed transform_expr_dps_before_destruct"
-  | Some (_, expr') ->
-      print_endline "success transform_expr_dps_before_destruct" ;
-      printf "expr_dps_before_destruct : %s became %s\n" (string_of_expr expr)
-        (string_of_expr expr') ) ;
+  (* ( match r with
+     | None ->
+         print_endline "failed transform_expr_dps_before_destruct"
+     | Some (_, expr') ->
+         print_endline "success transform_expr_dps_before_destruct" ;
+         printf "expr_dps_before_destruct : %s became %s\n" (string_of_expr expr)
+           (string_of_expr expr') ) ; *)
   r
 
 let expr_dps_before_destruct self n_args expr =

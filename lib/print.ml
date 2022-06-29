@@ -20,7 +20,7 @@ let rec value = function
   | VCons cons ->
       !^cons
   | VArray arr ->
-      group
+      group @@ align
       @@ brackets
            ( arr |> Array.to_list
            |> separate_map (break 0 ^^ semi ^^ space) value )
@@ -100,8 +100,8 @@ let rec expr ?(context = false) e =
       !^"()"
   | ECons {cons; payload} -> (
       (if context then parens else Fun.id)
-      @@ or_empty ( !^ ) cons
-      ^^
+      @@ or_empty ( !^ ) cons ^^ align
+      @@
       match payload with
       | [] ->
           empty
@@ -119,6 +119,22 @@ let rec expr ?(context = false) e =
           ^^ nest_break (expr value)
           ^/^ !^"in" )
         ^/^ expr body_in
+  | EMatch
+      { arg= ECons {cons= None; payload= payload_e}
+      ; branches= [(PCons {cons= None; payload= payload_p}, body_in)] }
+    when List.length payload_p = List.length payload_e ->
+      group
+        ( !^"let"
+        ^^ separate_map
+             (break 1 ^^ !^"and")
+             (fun (p, e) -> space ^^ pattern p ^-^ equals ^^ nest_break (expr e))
+             (List.combine payload_p payload_e)
+        ^/^ !^"in" )
+      ^/^ expr body_in
+  | EMatch {arg= value; branches= [(p, body_in)]} ->
+      group
+        (!^"let" ^-^ pattern p ^-^ equals ^^ nest_break (expr value) ^/^ !^"in")
+      ^/^ expr body_in
   | EMatch {arg; branches} ->
       (if context then parens else Fun.id)
       @@ group (!^"match" ^^ nest_break (expr arg) ^/^ !^"with")

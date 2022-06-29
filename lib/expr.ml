@@ -34,6 +34,19 @@ let%memo rec fv (expr : t) =
     | EPrimFunc (_, _) ->
         empty)
 
+let rec eq_pat p e =
+  match (p, e) with
+  | PVar v_p, EVar v_e when v_p = v_e ->
+      true
+  | ( PCons {cons= cons_p; payload= payload_p}
+    , ECons {cons= cons_e; payload= payload_e} )
+    when cons_p = cons_e && List.for_all2 eq_pat payload_p payload_e ->
+      true
+  | PAny, _ ->
+      true
+  | _, _ ->
+      false
+
 let var ident = EVar ident
 
 let func ~args ~body = EFunc {args; body}
@@ -47,6 +60,18 @@ let prim prim = EPrim prim
 let prim_func name func = EPrimFunc (name, func)
 
 let proj arr index = EProj {arr; index}
+
+let unit = EUnit
+
+let true_ = prim (Primitive.bool true)
+
+let false_ = prim (Primitive.bool false)
+
+let bool b = prim (Primitive.bool b)
+
+let cons ?(payload = []) cons = ECons {cons= Some cons; payload}
+
+let tuple payload = ECons {cons= None; payload}
 
 let write ~block ~i ~to_ = EWrite {arr= block; index= i; value= to_}
 
@@ -98,6 +123,23 @@ let rec is_tailrec self (body : t) =
 let let_ ?(is_rec = false) var ~equal ~in_ =
   ELet {var; is_rec; value= equal; body_in= in_}
 
+let let_pat pat ~equal ~in_ =
+  match pat with
+  | PVar var ->
+      let_ var ~equal ~in_
+  | _ ->
+      match_ equal ~with_:[(pat, in_)]
+
+let let_and bindings ~in_ =
+  match bindings with
+  | [] ->
+      failwith "Empty binding"
+  | [(pat, equal)] ->
+      let_pat pat ~equal ~in_
+  | _ :: _ ->
+      let pats, exprs = List.split bindings in
+      let_pat Pattern.(tuple pats) ~equal:(tuple exprs) ~in_
+
 let seq e1 e2 = let_ "_" ~equal:e1 ~in_:e2
 
 let rec seqs actions finally =
@@ -115,18 +157,6 @@ let rec seq_of_list li =
       e
   | e :: li ->
       seq e (seq_of_list li)
-
-let unit = EUnit
-
-let true_ = prim (Primitive.bool true)
-
-let false_ = prim (Primitive.bool false)
-
-let bool b = prim (Primitive.bool b)
-
-let cons ?(payload = []) cons = ECons {cons= Some cons; payload}
-
-let tuple payload = ECons {cons= None; payload}
 
 let rec list li =
   match li with
