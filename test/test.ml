@@ -18,6 +18,6 @@ let () =
     ; ( "Maps tmcc"
       , Tmcc.
           [ (*test_case "Tmc tailrecness" `Quick tailrecness*)
-           test_case "Test partition_map" `Quick partition_map
+            test_case "Test partition_map" `Quick partition_map
           ; test_case "Test partition_map_twister" `Quick partition_map_twister
-          ] ) ]
+          ; test_case "Test partition_map_deep" `Quick partition_map_deep ] ) ]
