@@ -29,3 +29,11 @@ let rec partition_map_deep = fun f li ->
     | Left (v) -> (:: (v, left), (center, right))
     | Center (v) -> (left, (:: (v, center), right))
     | Right (v) -> (left, (center, :: (v, right))) )
+
+let rec fold_left_map = fun f acc li ->
+  match li with
+  | [] -> (acc, [])
+  | :: (ele, li) -> (
+    let (acc, ele) = f acc ele in
+    let (acc, li) = fold_left_map f acc li in
+    (acc, :: (ele, li)) )

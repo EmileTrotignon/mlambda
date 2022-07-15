@@ -1,6 +1,5 @@
 open Ast
 open Printf
-open Print
 
 let env_add ident value env =
   (* printf "Adding %s to env\n" ident ;
@@ -22,10 +21,6 @@ let rec expr env e =
         v
     | None ->
         failwith (sprintf "Variable %s not found" ident) )
-  | ELet {var; is_rec; value; body_in} ->
-      let value = if is_rec then rec_func env var value else expr env value in
-      let env = env_add var value env in
-      expr env body_in
   | EAlloc n ->
       let n = n |> expr env |> Value.int_exn in
       VArray (Array.init n (fun _ -> VUnit))
@@ -36,7 +31,7 @@ let rec expr env e =
       if index >= Array.length arr then
         failwith
           (sprintf "Index %i is out of bounds for array %s" index
-             (string_of_value (VArray arr)) )
+             (Value.to_string (VArray arr)) )
       else arr.(index)
   | EWrite {arr; index; value} ->
       let arr = arr |> expr env |> Value.array_exn in
@@ -45,7 +40,7 @@ let rec expr env e =
       if index >= Array.length arr then
         failwith
           (sprintf "Index %i is out of bounds for array %s" index
-             (string_of_value (VArray arr)) )
+             (Value.to_string (VArray arr)) )
       else arr.(index) <- value ;
       VUnit
   | EApply {func; args} ->
@@ -73,9 +68,7 @@ let rec expr env e =
           branches
       with
       | None ->
-          Print.print_value stdout arg ;
-          Print.print_expr stdout e ;
-          failwith "match failed"
+          Value.print arg ; Expr.print e ; failwith "match failed"
       | Some v ->
           v )
 
@@ -207,7 +200,8 @@ let log = open_out "log_print"
 let prim_env =
   program_ Env.empty
     Struct_item.
-      [ prim_func_def_ar2 "add" (fun v1 v2 ->
+      [ prim_func_def_ar2 "equals" (fun v1 v2 -> Value.(equals v1 v2 |> bool))
+      ; prim_func_def_ar2 "add" (fun v1 v2 ->
             let v1 = Value.int_exn v1 in
             let v2 = Value.int_exn v2 in
             VInt (v1 + v2) )
@@ -229,7 +223,62 @@ let prim_env =
       ; prim_func_def_ar1 "double" (fun v ->
             let v = Value.int_exn v in
             VInt (2 * v) )
-      ; prim_func_def_ar1 "print" (fun v -> print_value log v ; VUnit) ]
+      ; prim_func_def_ar1 "print" (fun v -> Value.output log v ; VUnit)
+      ; prim_func_def_ar1 "array_length" (fun v ->
+            v |> Value.array_exn |> Array.length |> Value.int )
+      ; binding ~_rec:true "for_loop"
+          Expr.(
+            func ~args:["f"; "i"; "limit"]
+              ~body:
+                (if_
+                   (apply (var "equals") [var "i"; var "limit"])
+                   ~then_:unit
+                   ~else_:
+                     ( seq (apply (var "f") [var "i"])
+                     @@ apply (var "for_loop")
+                          [ var "f"
+                          ; apply (var "add") [var "i"; int 1]
+                          ; var "limit" ] ) ))
+      ; binding ~_rec:true "list_concat"
+          Expr.(
+            func ~args:["l1"; "l2"]
+              ~body:
+                (match_ (var "l1")
+                   ~with_:
+                     [ (Pattern.cons (Some "[]"), var "l2")
+                     ; ( Pattern.(
+                           cons (Some "::") ~payload:[var "ele"; var "l1"])
+                       , cons "::"
+                           ~payload:
+                             [ var "ele"
+                             ; apply (var "list_concat") [var "l1"; var "l2"] ]
+                       ) ] ))
+      ; binding ~_rec:true "list_iter"
+          Expr.(
+            func ~args:["f"; "li"]
+              ~body:
+                (match_ (var "li")
+                   ~with_:
+                     [ (Pattern.cons (Some "[]"), unit)
+                     ; ( Pattern.(
+                           cons (Some "::") ~payload:[var "ele"; var "li"])
+                       , seq
+                           (apply (var "f") [var "ele"])
+                           (apply (var "list_iter") [var "f"; var "li"]) ) ] ))
+      ; binding "write_all_dst"
+          Expr.(
+            func ~args:["dstli"; "v"]
+              ~body:
+                (apply (var "list_iter")
+                   [ func ~args:["dst"]
+                       ~body:
+                         (let_
+                            Pattern.(tuple [var "block"; var "i"])
+                            ~equal:(var "dst")
+                            ~in_:
+                              (write ~block:(var "block") ~i:(var "i")
+                                 ~to_:(var "v") ) )
+                   ; var "dstli" ] )) ]
 
 let program ?env p =
   match env with

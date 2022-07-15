@@ -21,7 +21,7 @@ and expr =
   | EUnit
  (* cons is optionnal because tuples do not have a cons *)
   | ECons of {cons: cons option; payload: expr list}
-  | ELet of {var: ident; is_rec: bool; value: expr; body_in: expr}
+  (* | ELet of {var: ident; is_rec: bool; value: expr; body_in: expr} *)
   | EMatch of {arg: expr; branches: (pattern * expr) list}
   | EPrimFunc of string * (value list -> value)
 

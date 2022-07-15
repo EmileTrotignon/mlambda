@@ -5,7 +5,7 @@ let test_write () =
     "same int" 1
     ( Eval.expr
         Expr.(
-          let_ "arr"
+          let_var "arr"
             ~equal:(alloc ~size:(int 2))
             ~in_:
               (seqs

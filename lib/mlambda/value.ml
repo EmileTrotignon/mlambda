@@ -1,11 +1,43 @@
 open Ast
 open Printf
-open Print
 open Result_monad
 
 type t = value
 
+include Print.Value
+
 type value_coertion_error = {message: string; value: t}
+
+let rec equals v1 v2 =
+  match (v1, v2) with
+  | VUnit, VUnit ->
+      true
+  | VInt i, VInt i' ->
+      i = i'
+  | VCons cons, VCons cons' ->
+      cons = cons'
+  | VString str, VString str' ->
+      str = str'
+  | VBool b, VBool b' ->
+      b = b'
+  | VArray arr, VArray arr' ->
+      Array.for_all2 equals arr arr'
+  | _, _ ->
+      false
+
+let ( = ) = equals
+
+let unit = VUnit
+
+let int i = VInt i
+
+let cons cons = VCons cons
+
+let string str = VString str
+
+let bool b = VBool b
+
+let array arr = VArray arr
 
 let to_int = function
   | VInt i ->
@@ -80,8 +112,8 @@ let to_exn f v =
       v
   | Error {message; value} ->
       failwith
-        (sprintf "Getting from:\n%s.\n%s : %s" (string_of_value v) message
-           (string_of_value value) )
+        (sprintf "Getting from:\n%s.\n%s : %s" (to_string v) message
+           (to_string value) )
 
 let list_exn = to_exn to_list
 

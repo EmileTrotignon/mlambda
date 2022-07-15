@@ -109,16 +109,6 @@ let rec expr ?(context = false) e =
           expr ~context:true e
       | _ :: _ :: _ ->
           parens (separate_map (comma ^^ space) expr payload) )
-  | ELet {var; value; is_rec; body_in} ->
-      if var = "_" then expr value ^-^ semi ^/^ expr body_in
-      else
-        group
-          ( !^"let"
-          ^-^ (if is_rec then !^"rec" ^^ space else empty)
-          ^^ !^var ^-^ equals
-          ^^ nest_break (expr value)
-          ^/^ !^"in" )
-        ^/^ expr body_in
   | EMatch
       { arg= ECons {cons= None; payload= payload_e}
       ; branches= [(PCons {cons= None; payload= payload_p}, body_in)] }
@@ -131,6 +121,8 @@ let rec expr ?(context = false) e =
              (List.combine payload_p payload_e)
         ^/^ !^"in" )
       ^/^ expr body_in
+  | EMatch {arg; branches= [(PAny, e)]} ->
+      group (expr_semi arg ^-^ semi ^/^ expr e)
   | EMatch {arg= value; branches= [(p, body_in)]} ->
       group
         (!^"let" ^-^ pattern p ^-^ equals ^^ nest_break (expr value) ^/^ !^"in")
@@ -145,6 +137,15 @@ let rec expr ?(context = false) e =
            branches
   | EPrimFunc (name, _) ->
       !^"primitive" ^^ braces !^name
+
+and expr_semi e =
+  match e with
+  | EMatch {arg; branches= [(PAny, e)]} ->
+      expr_semi arg ^-^ semi ^/^ expr e
+  | _ ->
+      expr e
+
+let expr e = expr e
 
 let si = function
   | Binding {name; is_rec; body} ->
@@ -184,26 +185,70 @@ let to_string f arg =
   ToBuffer.pretty 0.8 80 buffer doc ;
   Buffer.contents buffer
 
-let print_value = to_channel value
+let to_format f fmt arg =
+  let doc = f arg in
+  ToFormatter.pretty 0.8 80 fmt doc
 
-let string_of_value = to_string value
+module type Printer = sig
+  type a
 
-let print_env = to_channel env
+  val output : out_channel -> a -> unit
 
-let string_of_env = to_string env
+  val print : a -> unit
 
-let print_expr = to_channel expr
+  val to_string : a -> string
 
-let string_of_expr = to_string expr
+  val pp : Format.formatter -> a -> unit
+end
 
-let print_pattern = to_channel pattern
+module Export (P : sig
+  type t
 
-let string_of_pattern = to_string pattern
+  val printer : t -> document
+end) : Printer with type a = P.t = struct
+  type a = P.t
 
-let print_si = to_channel si
+  let output = to_channel P.printer
 
-let string_of_si = to_string si
+  let print = output stdout
 
-let print_program = to_channel program
+  let to_string = to_string P.printer
 
-let string_of_program = to_string program
+  let pp = to_format P.printer
+end
+
+module Value = Export (struct
+  type t = value
+
+  let printer = value
+end)
+
+module Env = Export (struct
+  type t = value Env.t
+
+  let printer = env
+end)
+
+module Expr = Export (struct
+  type t = expr
+
+  let printer = expr
+end)
+
+module Pattern = Export (struct
+  type t = pattern
+
+  let printer = pattern
+end)
+
+module Struct_item = Export (struct
+  type t = struct_item
+
+  let printer = si
+end)
+
+module Program = Export (struct
+  type t = program
+
+  let printer = program
+end)

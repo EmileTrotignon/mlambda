@@ -5,8 +5,6 @@ let rec transformable_expr self expr =
   match expr with
   | EApply {func= EVar func_name; args= _} when func_name = self ->
       true
-  | ELet {body_in; _} ->
-      transformable_expr self body_in
   | ECons {cons= _; payload} ->
       List.exists (transformable_expr self) payload
   | EMatch {arg= _; branches} ->
@@ -77,12 +75,11 @@ let rec expr_dps self n_args index expr =
         (EApply
            {func= EVar (self ^ "_dps"); args= Expr.var "dst'" :: e_index :: args}
         )
-  | ELet {var; is_rec; value; body_in} ->
-      assert (not is_rec) ;
+  | EMatch {arg= value; branches= [(PVar var, body_in)]} ->
       (* We then transform the code after the binding. *)
       let+ body_in = expr_dps self n_args index body_in in
       (* And we just restore the binding with the transformed [body_in] *)
-      ELet {var; is_rec; value; body_in}
+      EMatch {arg= value; branches= [(PVar var, body_in)]}
   | ECons {cons; payload} ->
       let+ expr, payload =
         List.find_and_replace_i
@@ -113,11 +110,11 @@ let rec expr_dps self n_args index expr =
            destination. *)
       let cons_ = cons in
       Expr.(
-        let_ "dst'"
+        let_var "dst'"
           ~equal:(ECons {cons= cons_; payload})
           ~in_:
             ( seqs [write ~block:(var "dst") ~i:e_index ~to_:(var "dst'")]
-            @@ let_ "dst" ~equal:(var "dst'") ~in_:expr ))
+            @@ let_var "dst" ~equal:(var "dst'") ~in_:expr ))
   | EMatch {arg; branches} ->
       (* We need to transform the branches. Each branch can be either
          succesfully transformed, or plugged as-is in a write statement.
@@ -174,7 +171,7 @@ let expr self e =
         Expr.(
           func ~args
             ~body:
-              (let_ "dst"
+              (let_var "dst"
                  ~equal:(alloc ~size:(int 1))
                  ~in_:
                    ( seqs

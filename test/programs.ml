@@ -1,6 +1,6 @@
 open Mlambda
 
-let env = Parse.file "maps.mlambda" (*|.> print_program stdout*)
+let env = Parse.file "tmc.mlambda" (*|.> Program.output stdout*)
 
 let map () =
   Alcotest.(check (list int))

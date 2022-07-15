@@ -1,6 +1,8 @@
 (library
  (name mlambda)
- (libraries pprint memolib)
+ (libraries pprint memolib common)
+ (flags
+  (:standard -open Common))
  (preprocess
   (pps ppx_memo)))
 

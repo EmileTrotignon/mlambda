@@ -1,6 +1,9 @@
 (test
  (name test)
- (libraries mlambda alcotest)
+ (libraries mlambda alcotest common)
+ (flags
+  (:standard -open Common))
  (deps
-  (file maps.mlambda)
-  (file partition_map.mlambda)))
+  (file tmc.mlambda)
+  (file tmc_murmus.mlambda)
+  (file tmc_mur.mlambda)))

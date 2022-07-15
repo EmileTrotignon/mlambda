@@ -23,9 +23,6 @@ let%memo rec fv (expr : t) =
         empty
     | ECons {cons= _; payload} ->
         payload |> List.map fv |> unions
-    | ELet {var; is_rec; value; body_in} ->
-        if is_rec then remove var (fv value + fv body_in)
-        else fv value + remove var (fv body_in)
     | EMatch {arg; branches} ->
         fv arg
         + ( branches
@@ -106,11 +103,6 @@ let rec is_tailrec self (body : t) =
       true
   | ECons {payload; _} ->
       List.for_all (fun expr -> not (String.Set.mem self (fv expr))) payload
-  | ELet {var; is_rec= true; _} when var = self ->
-      true
-  | ELet {var; is_rec= _; value; body_in} ->
-      (not (String.Set.mem self (fv value)))
-      && if var = self then true else is_tailrec self body_in
   | EMatch {arg; branches} ->
       (not (String.Set.mem self (fv arg)))
       && List.for_all
@@ -120,27 +112,21 @@ let rec is_tailrec self (body : t) =
   | EPrimFunc _ ->
       true
 
-let let_ ?(is_rec = false) var ~equal ~in_ =
-  ELet {var; is_rec; value= equal; body_in= in_}
+let let_ pat ~equal ~in_ = match_ equal ~with_:[(pat, in_)]
 
-let let_pat pat ~equal ~in_ =
-  match pat with
-  | PVar var ->
-      let_ var ~equal ~in_
-  | _ ->
-      match_ equal ~with_:[(pat, in_)]
+let let_var var ~equal ~in_ = let_ (PVar var) ~equal ~in_
 
 let let_and bindings ~in_ =
   match bindings with
   | [] ->
       failwith "Empty binding"
   | [(pat, equal)] ->
-      let_pat pat ~equal ~in_
+      let_ pat ~equal ~in_
   | _ :: _ ->
       let pats, exprs = List.split bindings in
-      let_pat Pattern.(tuple pats) ~equal:(tuple exprs) ~in_
+      let_ Pattern.(tuple pats) ~equal:(tuple exprs) ~in_
 
-let seq e1 e2 = let_ "_" ~equal:e1 ~in_:e2
+let seq e1 e2 = let_ PAny ~equal:e1 ~in_:e2
 
 let rec seqs actions finally =
   match actions with
@@ -168,3 +154,9 @@ let rec list li =
 let int i = prim (Primitive.int i)
 
 let string s = prim (Primitive.string s)
+
+let for_ i ~equals ~to_ ~do_ =
+  apply (var "for_loop") [func ~args:[i] ~body:do_; equals; to_]
+
+
+include Print.Expr

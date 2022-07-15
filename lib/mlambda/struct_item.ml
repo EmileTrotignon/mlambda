@@ -28,3 +28,4 @@ let is_tailrec (si : t) =
       is_rec || Expr.is_tailrec name body
   | MutualRecBindings bds ->
       List.for_all (fun (name, body) -> Expr.is_tailrec name body) bds
+include Print.Struct_item

@@ -16,3 +16,5 @@ let find_def (program : t) name =
       | _ ->
           None )
     program
+
+include Print.Program

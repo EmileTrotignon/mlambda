@@ -66,14 +66,14 @@ let rec expr e bindings =
           String.Set.empty payload
       in
       (optimised, ECons {cons; payload})
-  | ELet {var; is_rec; value; body_in} ->
+  | EMatch {arg= value; branches= [(PVar var, body_in)]} ->
       let optimised_value, value' = expr value bindings in
       let bindings = String.Set.(remove_from_env bindings (Expr.fv value)) in
       let bindings = Env.add var value bindings in
       let optimised_body_in, body_in = expr body_in bindings in
       ( String.Set.(optimised_value + optimised_body_in)
       , if String.Set.mem var optimised_body_in then body_in
-        else ELet {var; is_rec; value= value'; body_in} )
+        else EMatch {arg= value'; branches= [(PVar var, body_in)]} )
   | EMatch {arg; branches} ->
       let optimised, arg = expr arg bindings in
       let bindings = String.Set.(remove_from_env bindings (Expr.fv arg)) in

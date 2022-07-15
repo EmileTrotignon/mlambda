@@ -3,8 +3,9 @@ open Helpers
 
 let log = open_out "tmc.log"
 
-let env = Parse.file "maps.mlambda" |> Inline.program |> Tmc.program
-|.> print_program log
+let env =
+  Parse.file "tmc.mlambda" |> Inline.program |> Tmc.program
+  |.> Program.output log
 
 let tailrecness () =
   List.iter (tailrecness env)
@@ -50,3 +51,13 @@ let map_double_cond_let () =
             (var "map_double_cond_let")
             [var "double"; var "is_pair"; list [int 1; int 2; int 3]])
     |> Value.int_list_exn )
+
+let tests =
+  Alcotest.
+    [ test_case "Tmc tailrecness" `Quick tailrecness
+    ; test_case "Map tmc" `Quick map
+    ; test_case "Map with let tmc" `Quick map_let
+    ; test_case "Map double tmc" `Quick map_double
+    ; test_case "Map double cond tmc" `Quick map_double_cond
+    ; test_case "Map double cond let tmc" `Quick map_double_cond_let ]
+  

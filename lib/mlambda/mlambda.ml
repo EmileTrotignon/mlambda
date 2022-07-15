@@ -10,14 +10,14 @@ module Value = Value
 
 (** Use *)
 
-include Print
 module Parse = Parse
 module Eval = Eval
 
 (** Transformations *)
 
 module Tmc = Tmc
-module Tmcc = Tmcc
+module Tmc_mur = Tmc_mur
+module Tmc_murmus = Tmc_murmus
 module Inline = Inline
 
 (** Helpers *)

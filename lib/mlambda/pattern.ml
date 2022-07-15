@@ -2,6 +2,8 @@ open Ast
 
 type t = Ast.pattern
 
+include Print.Pattern
+
 let%memo rec vars (pat : pattern) =
   match pat with
   | PAny ->
@@ -27,7 +29,7 @@ let rec vars_numbered i pattern =
 
 let vars_numbered p =
   print_string "VARS NUMBERED : " ;
-  Print.print_pattern stdout p ;
+  print p ;
   p |> vars_numbered 0 |> snd
 
 let block_size pat =
