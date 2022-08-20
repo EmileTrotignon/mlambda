@@ -9,3 +9,12 @@ let result_list_map f li =
       let+ ele = f ele in
       ele :: li )
     li (Ok [])
+
+let rec result_list_fold_map f acc li =
+  match li with
+  | [] ->
+      Ok (acc, [])
+  | ele :: li ->
+      let* acc, ele = f acc ele in
+      let+ acc, li = result_list_fold_map f acc li in
+      (acc, ele :: li)

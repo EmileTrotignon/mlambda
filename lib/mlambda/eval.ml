@@ -21,28 +21,6 @@ let rec expr env e =
         v
     | None ->
         failwith (sprintf "Variable %s not found" ident) )
-  | EAlloc n ->
-      let n = n |> expr env |> Value.int_exn in
-      VArray (Array.init n (fun _ -> VUnit))
-  | EProj {arr; index} ->
-      print_endline "eval EProj" ;
-      let arr = arr |> expr env |> Value.array_exn in
-      let index = index |> expr env |> Value.int_exn in
-      if index >= Array.length arr then
-        failwith
-          (sprintf "Index %i is out of bounds for array %s" index
-             (Value.to_string (VArray arr)) )
-      else arr.(index)
-  | EWrite {arr; index; value} ->
-      let arr = arr |> expr env |> Value.array_exn in
-      let index = index |> expr env |> Value.int_exn in
-      let value = expr env value in
-      if index >= Array.length arr then
-        failwith
-          (sprintf "Index %i is out of bounds for array %s" index
-             (Value.to_string (VArray arr)) )
-      else arr.(index) <- value ;
-      VUnit
   | EApply {func; args} ->
       apply env func args
   | EFunc {args; body} ->
@@ -200,7 +178,25 @@ let log = open_out "log_print"
 let prim_env =
   program_ Env.empty
     Struct_item.
-      [ prim_func_def_ar2 "equals" (fun v1 v2 -> Value.(equals v1 v2 |> bool))
+      [ prim_func_def_ar1 "alloc" (fun v_n ->
+            let n = Value.int_exn v_n in
+            Value.array (Array.init n (fun _ -> VUnit)) )
+      ; prim_func_def_ar2 "proj" (fun v_arr v_i ->
+            let arr = Value.array_exn v_arr and i = Value.int_exn v_i in
+            if i >= Array.length arr then
+              failwith
+                (sprintf "Index %i is out of bounds for array %s" i
+                   (Value.to_string (VArray arr)) )
+            else arr.(i) )
+      ; prim_func_def_ar3 "write" (fun v_arr v_i vv ->
+            let arr = Value.array_exn v_arr and i = Value.int_exn v_i in
+            if i >= Array.length arr then
+              failwith
+                (sprintf "Index %i is out of bounds for array %s" i
+                   (Value.to_string (VArray arr)) )
+            else arr.(i) <- vv ;
+            VUnit )
+      ; prim_func_def_ar2 "equals" (fun v1 v2 -> Value.(equals v1 v2 |> bool))
       ; prim_func_def_ar2 "add" (fun v1 v2 ->
             let v1 = Value.int_exn v1 in
             let v2 = Value.int_exn v2 in

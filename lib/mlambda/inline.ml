@@ -22,34 +22,6 @@ let rec expr e bindings =
       (optimised, EFunc {args; body})
   | EApply _ | EPrim _ | EPrimFunc _ | EUnit ->
       (String.Set.empty, e)
-  | EAlloc i ->
-      let optimised, i = expr i bindings in
-      (optimised, EAlloc i)
-  | EProj {arr; index} ->
-      let fv_arr = Expr.fv arr in
-      let fv_index = Expr.fv index in
-      let optimised_arr, arr =
-        expr arr (String.Set.remove_from_env bindings fv_index)
-      in
-      let optimised_index, index =
-        expr arr (String.Set.remove_from_env bindings fv_arr)
-      in
-      (String.Set.(optimised_arr + optimised_index), EProj {arr; index})
-  | EWrite {arr; index; value} ->
-      let fv_arr = Expr.fv arr in
-      let fv_index = Expr.fv index in
-      let fv_value = Expr.fv value in
-      let optimised_arr, arr =
-        expr arr String.Set.(remove_from_env bindings (fv_index + fv_value))
-      in
-      let optimised_index, index =
-        expr arr String.Set.(remove_from_env bindings (fv_arr + fv_value))
-      in
-      let optimised_value, value =
-        expr value String.Set.(remove_from_env bindings (fv_arr + fv_index))
-      in
-      ( String.Set.(optimised_arr + optimised_index + optimised_value)
-      , EWrite {arr; index; value} )
   | ECons {cons; payload} ->
       let optimised, payload =
         List.fold_left_mapi
@@ -66,21 +38,31 @@ let rec expr e bindings =
           String.Set.empty payload
       in
       (optimised, ECons {cons; payload})
-  | EMatch {arg= value; branches= [(PVar var, body_in)]} ->
-      let optimised_value, value' = expr value bindings in
-      let bindings = String.Set.(remove_from_env bindings (Expr.fv value)) in
-      let bindings = Env.add var value bindings in
-      let optimised_body_in, body_in = expr body_in bindings in
-      ( String.Set.(optimised_value + optimised_body_in)
-      , if String.Set.mem var optimised_body_in then body_in
-        else EMatch {arg= value'; branches= [(PVar var, body_in)]} )
-  | EMatch {arg; branches} ->
-      let optimised, arg = expr arg bindings in
+  (*let var = arg in body_in *)
+  | EMatch {arg; branches= [(PVar var, body_in)]} ->
+      let bindings_arg =
+        String.Set.(remove_from_env bindings (Expr.fv body_in))
+      in
+      let optimised_arg, arg = expr arg bindings_arg in
       let bindings = String.Set.(remove_from_env bindings (Expr.fv arg)) in
+      let bindings = Env.add var arg bindings in
+      let optimised_body_in, body_in = expr body_in bindings in
+      ( String.Set.(optimised_arg + optimised_body_in)
+      , if String.Set.mem var optimised_body_in then body_in
+        else EMatch {arg= arg; branches= [(PVar var, body_in)]} )
+  | EMatch {arg; branches} ->
+      let fv_branches  =
+        branches |> List.map snd |> List.map Expr.fv |> String.Set.unions
+      in
+      let bindings_arg = String.Set.(remove_from_env bindings fv_branches) in
+      let optimised, arg = expr arg bindings_arg in
+      let bindings = String.Set.(remove_from_env bindings (Expr.fv arg)) in
+      let bindings = String.Set.(remove_from_env bindings optimised) in
       let optimised, branches =
         List.fold_left_map
-          (fun optimised (pat, e) ->
+          (fun  optimised (pat, e) ->
             let bindings =
+              (* shadowed *)
               String.Set.(remove_from_env bindings (Pattern.vars pat))
             in
             let optimised', e = expr e bindings in

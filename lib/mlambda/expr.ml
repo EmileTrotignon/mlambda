@@ -11,14 +11,8 @@ let%memo rec fv (expr : t) =
         fv body - (args |> List.map singleton |> unions)
     | EApply {func; args} ->
         fv func + (args |> List.map fv |> unions)
-    | EAlloc e ->
-        fv e
     | EPrim _ ->
         empty
-    | EProj {arr; index} ->
-        union (fv arr) (fv index)
-    | EWrite {arr; index; value} ->
-        union (fv arr) @@ union (fv index) (fv value)
     | EUnit ->
         empty
     | ECons {cons= _; payload} ->
@@ -50,13 +44,13 @@ let func ~args ~body = EFunc {args; body}
 
 let apply func args = EApply {func; args}
 
-let alloc ~size = EAlloc size
+let alloc ~size = apply (var "alloc") [size]
 
 let prim prim = EPrim prim
 
 let prim_func name func = EPrimFunc (name, func)
 
-let proj arr index = EProj {arr; index}
+let proj arr index = apply (var "proj") [arr; index]
 
 let unit = EUnit
 
@@ -70,7 +64,7 @@ let cons ?(payload = []) cons = ECons {cons= Some cons; payload}
 
 let tuple payload = ECons {cons= None; payload}
 
-let write ~block ~i ~to_ = EWrite {arr= block; index= i; value= to_}
+let write ~block ~i ~to_ = apply (var "write") [block; i; to_]
 
 let match_ arg ~with_ = EMatch {arg; branches= with_}
 
@@ -88,17 +82,8 @@ let rec is_tailrec self (body : t) =
       if List.mem self args then true else is_tailrec self body
   | EApply {args; _} ->
       List.for_all (fun expr -> not (String.Set.mem self (fv expr))) args
-  | EAlloc i ->
-      not (String.Set.mem self (fv i))
   | EPrim _ ->
       true
-  | EProj {arr; index} ->
-      (not (String.Set.mem self (fv arr)))
-      && not (String.Set.mem self (fv index))
-  | EWrite {arr; index; value} ->
-      (not (String.Set.mem self (fv arr)))
-      && (not (String.Set.mem self (fv index)))
-      && not (String.Set.mem self (fv value))
   | EUnit ->
       true
   | ECons {payload; _} ->
@@ -144,6 +129,10 @@ let rec seq_of_list li =
   | e :: li ->
       seq e (seq_of_list li)
 
+let int i = prim (Primitive.int i)
+
+let string s = prim (Primitive.string s)
+
 let rec list li =
   match li with
   | [] ->
@@ -151,12 +140,9 @@ let rec list li =
   | ele :: li ->
       cons "::" ~payload:[ele; list li]
 
-let int i = prim (Primitive.int i)
-
-let string s = prim (Primitive.string s)
+let int_list li = li |> List.map int |> list
 
 let for_ i ~equals ~to_ ~do_ =
   apply (var "for_loop") [func ~args:[i] ~body:do_; equals; to_]
-
 
 include Print.Expr

@@ -1,7 +1,7 @@
 module Set = struct
   include Set.Make (Stdlib.String)
 
-  let env_domain map = Env.fold (fun elt _ set -> add elt set) map empty
+  let env_domain map = map |> Env.to_seq |> Seq.map fst |> of_seq
 
   (* let to_env ~f set =
      fold (fun elt map -> Env.add elt (f elt) map) set Env.empty *)

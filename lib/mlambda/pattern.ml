@@ -27,10 +27,7 @@ let rec vars_numbered i pattern =
       let i, payload_env = List.fold_left_map vars_numbered i payload in
       (i, List.fold_left Env.union Env.empty payload_env)
 
-let vars_numbered p =
-  print_string "VARS NUMBERED : " ;
-  print p ;
-  p |> vars_numbered 0 |> snd
+let vars_numbered p = p |> vars_numbered 0 |> snd
 
 let block_size pat =
   match pat with

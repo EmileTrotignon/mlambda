@@ -16,8 +16,6 @@ let rec map_double_cond = fun f p li ->
   | :: (ele, li) -> (
     let cond = p ele in
     let ele' = f ele in
-    print cond ;
-    print ele' ;
     :: (f ele,
         if p ele then
           :: (f ele, map_double_cond f p li)

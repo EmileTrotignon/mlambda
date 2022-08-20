@@ -19,6 +19,7 @@ module Tmc = Tmc
 module Tmc_mur = Tmc_mur
 module Tmc_murmus = Tmc_murmus
 module Inline = Inline
+module Anf = Anf
 
 (** Helpers *)
 

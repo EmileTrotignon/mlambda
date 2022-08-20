@@ -4,6 +4,6 @@
  (flags
   (:standard -open Common))
  (deps
-  (file tmc.mlambda)
-  (file tmc_murmus.mlambda)
-  (file tmc_mur.mlambda)))
+  (file simple.mlambda)
+  (file mur.mlambda)
+  (file murmus.mlambda)))

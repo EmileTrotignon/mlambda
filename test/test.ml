@@ -2,11 +2,11 @@ let () =
   let open Alcotest in
   run "Tests"
     [ ("Misceallenous tests", Misc.[test_case "Mlambda write" `Quick test_write])
-    ; ( "Program tests"
-      , Programs.
-          [ test_case "Map" `Quick map
-          ; test_case "Map double" `Quick map_double
-          ; test_case "Map double cond" `Quick map_double_cond ] )
-    ; ("tmc", Tmc.tests)
+    ; ("simple", Simple.tests)
+    ; ("mur", Mur.tests)
+    ; ("murmus", Murmus.tests)
+    ; ("tmc simple", Tmc.tests)
+    ; ("anf", Anf.tests)
+    ; ("inline", Inline.tests)
     ; ("tmc mur", Tmc_mur.tests)
     ; ("tmc murmus", Tmc_murmus.tests) ]

@@ -1,6 +1,5 @@
 open Ast
 open Option_monad
-open Printf
 
 type index = Int of int | Variable of string
 
@@ -18,6 +17,8 @@ let dst_list_name_input i = "dst_in_" ^ string_of_int i
 
 let write_all_dst = Expr.var "write_all_dst"
 
+type destination = List of ident | Block of ident * expr
+
 (** [expr_dps_after_construct dst_name index rec_vars expr]
     - [dst_name] and [index] is the destination we are writing to.
     - [rec_vars] is the set of available variable to be obtained from the
@@ -30,10 +31,6 @@ let write_all_dst = Expr.var "write_all_dst"
    [e] is an expression that writes [expr] to [dst_name.index] with a hole
    instead of [v], and returns (at runtime) the address of the hole. *)
 let rec expr_dps_after_construct dst rec_vars expr =
-  print_string "EXPR DPS AFTER CONSTRUCT rec_vars =" ;
-  Env.iter (fun var _ -> printf "%s " var) rec_vars ;
-  print_string "; " ;
-  Expr.print expr ;
   match expr with
   | EVar var when Env.mem var rec_vars ->
       let i_var = Env.find var rec_vars in
@@ -44,11 +41,11 @@ let rec expr_dps_after_construct dst rec_vars expr =
             ~i:(int 0)
             ~to_:
               ( match dst with
-              | `list list_name ->
+              | List list_name ->
                   apply (var "list_concat")
                     [ var list_name
                     ; proj (var (dst_list_name_output i_var)) (int 0) ]
-              | `block (block_name, e_index) ->
+              | Block (block_name, e_index) ->
                   cons "::"
                     ~payload:
                       [ tuple [var block_name; e_index]
@@ -61,7 +58,7 @@ let rec expr_dps_after_construct dst rec_vars expr =
             let index = index + if Option.is_some cons then 1 else 0 in
             match
               expr_dps_after_construct
-                (`block (block_name, Expr.int index))
+                (Block (block_name, Expr.int index))
                 rec_vars expr
             with
             | Some expr' ->
@@ -74,7 +71,7 @@ let rec expr_dps_after_construct dst rec_vars expr =
       let cons_ = cons in
       Some
         ( match dst with
-        | `list li_name ->
+        | List li_name ->
             Expr.(
               let_var block_name
                 ~equal:(ECons {cons= cons_; payload})
@@ -82,7 +79,7 @@ let rec expr_dps_after_construct dst rec_vars expr =
                   (seq_of_list
                      ( [apply write_all_dst [var li_name; var block_name]]
                      @ exprs ) ))
-        | `block (dst_name, e_index) ->
+        | Block (dst_name, e_index) ->
             Expr.(
               let_var block_name
                 ~equal:(ECons {cons= cons_; payload})
@@ -92,16 +89,23 @@ let rec expr_dps_after_construct dst rec_vars expr =
                            ~to_:(var block_name) ]
                      @ exprs ) )) )
   | EMatch {arg; branches} ->
-      let* branches =
-        option_list_map
-          (fun (pat, expr) ->
-            let* expr = expr_dps_after_construct dst rec_vars expr in
-            Some (pat, expr) )
-          branches
-      in
-      Some (EMatch {arg; branches})
+      let fv_arg = Expr.fv arg in
+      if not String.Set.(is_empty (inter (env_domain rec_vars) fv_arg)) then
+        None
+      else
+        let+ branches =
+          option_list_map
+            (fun (pat, expr) ->
+              let* expr = expr_dps_after_construct dst rec_vars expr in
+              Some (pat, expr) )
+            branches
+        in
+        EMatch {arg; branches}
   | _ ->
       None
+
+let expr_dps_after_construct dst rec_vars expr =
+  expr_dps_after_construct dst rec_vars (*Inline.expr*) expr
 
 (** [expr_dps_construct rec_vars_complete rec_vars rec_pattern expr]
     - [rec_vars_complete] contains all variables mapped to their index.
@@ -122,10 +126,6 @@ let rec expr_dps_after_construct dst rec_vars expr =
     passed to the recursive call for the hole to be filled.
 *)
 let rec expr_dps_construct rec_vars_complete rec_vars rec_pattern expr =
-  print_string "EXPR DPS CONSTRUCT rec_vars =" ;
-  Env.iter (fun var _ -> printf "%s " var) rec_vars ;
-  print_string "; " ;
-  Expr.print expr ;
   match (rec_pattern, expr) with
   | PVar var, expr ->
       let i =
@@ -136,7 +136,7 @@ let rec expr_dps_construct rec_vars_complete rec_vars rec_pattern expr =
             i
       in
       let dst_name = dst_list_name_input i in
-      let+ r = expr_dps_after_construct (`list dst_name) rec_vars expr in
+      let+ r = expr_dps_after_construct (List dst_name) rec_vars expr in
       r
   | ( PCons {cons= pcons; payload= ppayload}
     , ECons {cons= econs; payload= epayload} )
@@ -199,16 +199,6 @@ let rec expr_dps_after_destruct self args rec_pattern expr =
   | _ ->
       None
 
-let expr_dps_after_destruct self args rec_pattern expr =
-  let r = expr_dps_after_destruct self args rec_pattern expr in
-  ( match r with
-  | None ->
-      print_endline "failed expr_dps_after_destruct on :" ;
-      Expr.print expr
-  | Some _ ->
-      print_endline "success expr_dps_after_destruct" ) ;
-  r
-
 (** [expr_dps_notrec rec_pat expr]
     - [rec_pat] is the pattern that is used somewhere else in the function to
       destruct the result of a recursive call.
@@ -238,7 +228,9 @@ let rec expr_dps_before_destruct self n_args expr =
   match expr with
   | EMatch {arg= EApply {func= EVar funcname; args}; branches= [(pattern, expr)]}
     when funcname = self && List.length args = n_args ->
-      let+ expr = expr_dps_after_destruct self args pattern expr in
+      let+ expr =
+        expr_dps_after_destruct self args pattern (Inline.expr expr)
+      in
       let arity = Pattern.n_vars pattern in
       let expr =
         Expr.(
@@ -280,36 +272,20 @@ let rec expr_dps_before_destruct self n_args expr =
   | _ ->
       None
 
-let expr_dps_before_destruct self n_args expr =
-  let r = expr_dps_before_destruct self n_args expr in
-  ( match r with
-  | None ->
-      print_endline "failed transform_expr_dps_before_destruct"
-  | Some (_, expr') ->
-      print_endline "success transform_expr_dps_before_destruct" ;
-      printf "expr_dps_before_destruct : %s became %s\n" (Expr.to_string expr)
-        (Expr.to_string expr') ) ;
-  r
-
-(*
-let dsts_of_pat pat =
-  dsts_of_pat pat |> List.map (fun (a, b) -> [a; b]) |> List.concat *)
-
 let index_name i = "i" ^ string_of_int i
 
 let expr self e =
   match e with
   | EFunc {args; body} ->
       let+ rec_pat, transformed =
-        expr_dps_before_destruct self (List.length args) body
+        expr_dps_before_destruct self (List.length args) (Anf.expr body)
       in
       let rec_vars = Pattern.vars_numbered rec_pat in
       let arity = Pattern.n_vars rec_pat in
       let name_dps = self ^ "_dps" in
       let dps =
-        let body = transformed in
         let args = List.init arity dst_list_name_input @ args in
-        EFunc {args; body}
+        EFunc {args; body= transformed}
       in
       let rec aux_construct (pat : pattern) =
         match pat with
@@ -339,7 +315,7 @@ let expr self e =
   | _ ->
       None
 
-let expr_cons self e =
+let expr self e =
   match expr self e with
   | Some v ->
       Some v
@@ -352,7 +328,7 @@ let si si =
   | Binding {name; body; is_rec} -> (
       if not is_rec then si
       else
-        match expr_cons name body with
+        match expr name body with
         | Some (entry, dps) ->
             MutualRecBindings [(name, entry); (name ^ "_dps", dps)]
         | None ->

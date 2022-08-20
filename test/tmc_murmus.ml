@@ -1,47 +1,29 @@
-open Helpers
-
-let log = open_out "tmc_murmus.log"
-
-module Regression = Tmc_mur.T (struct
-  let env =
-    Mlambda.(
-      "tmc_mur.mlambda" |> Parse.file |> Tmc_murmus.program
-      |.> Program.output log)
-end)
-
 open Mlambda
 
-let env =
-  "tmc_murmus.mlambda" |> Parse.file |> Tmc_murmus.program
-  |.> Program.output log
+let transform li =  li |> Tmc_murmus.program |> Inline.program
 
-let tailrecness () = List.iter (tailrecness env) ["tree"]
+module Regression_simple = Simple.Tests (struct
+  let log = "tmc_murmus_regression_simple.log"
 
-let tree_value =
-  Value.(
-    array
-      [| cons "Node"
-       ; int 3
-       ; array
-           [| cons "Node"
-            ; int 2
-            ; array [|cons "Node"; int 1; cons "Leaf"; cons "Leaf"|]
-            ; array [|cons "Node"; int 1; cons "Leaf"; cons "Leaf"|] |]
-       ; array
-           [| cons "Node"
-            ; int 2
-            ; array [|cons "Node"; int 1; cons "Leaf"; cons "Leaf"|]
-            ; array [|cons "Node"; int 1; cons "Leaf"; cons "Leaf"|] |] |])
+  let transform = transform
 
-let tree () =
-  Alcotest.(
-    check
-      (Alcotest.testable Value.pp Value.( = ))
-      "same tree" tree_value
-      (Expr.(apply (var "tree") [int 3]) |> Eval.expr ~env))
+  let expects_tailrec = true
+end)
 
-let tests =
-  Alcotest.
-    [ test_case "Tmc murmus tailrecness" `Quick tailrecness
-    ; test_case "Complete tree" `Quick tree ]
-  @ Regression.tests
+module Regression_mur = Mur.Tests (struct
+  let log = "tmc_murmus_regression_mur.log"
+
+  let transform = transform
+
+  let expects_tailrec = true
+end)
+
+module Current = Murmus.Tests (struct
+  let log = "tmc_murmus.log"
+
+  let transform = transform
+
+  let expects_tailrec = true
+end)
+
+let tests = Regression_simple.tests @ Regression_mur.tests @ Current.tests

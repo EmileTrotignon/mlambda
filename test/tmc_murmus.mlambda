@@ -1,7 +1,0 @@
-let rec tree = fun n ->
-  if (equals n 0) then
-    Leaf
-  else (
-    let sub = tree (sub n 1) in
-    Node (n, sub, sub)
-  )

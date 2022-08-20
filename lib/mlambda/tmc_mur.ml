@@ -1,14 +1,36 @@
 open Ast
-open Option_monad
+open Result_monad
 open Printf
+
+type step =
+  | AfterConstruct
+  | DuringConstruct
+  | AfterDestruct
+  | BeforeDestruct
+  | Entry
+
+type mur_error = {step: step; reason: string; expr: expr}
+
+let error_to_string {step; expr= _; reason} =
+  sprintf "Failure %s because %s"
+    ( match step with
+    | AfterConstruct ->
+        "after construct"
+    | DuringConstruct ->
+        "during construct"
+    | AfterDestruct ->
+        "after destruct"
+    | BeforeDestruct ->
+        "before destruct"
+    | Entry ->
+        "during entry" )
+    reason
 
 let dst_name_of_int i = "dst" ^ string_of_int i
 
 let index_name_of_int i = "i" ^ string_of_int i
 
-type index = Int of int | Variable of string
-
-let expr_of_index = Expr.(function Int i -> int i | Variable v -> var v)
+let step = AfterConstruct
 
 (** [expr_dps_after_construct dst_name index rec_vars expr]
     - [dst_name] and [index] is the destination we are writing to.
@@ -21,67 +43,92 @@ let expr_of_index = Expr.(function Int i -> int i | Variable v -> var v)
    and [Some (v, e)] otherwise, where [v] is the variable from [rec_vars] and
    [e] is an expression that writes [expr] to [dst_name.index] with a hole
    instead of [v], and returns (at runtime) the address of the hole. *)
-let rec expr_dps_after_construct dst_name index rec_vars expr =
-  let dst'_name = dst_name ^ "'" in
-  let e_index = expr_of_index index in
+let rec expr_dps_after_construct ~block ~index rec_vars expr =
   match expr with
-  | EVar var when Env.mem var rec_vars ->
-      Some (var, Expr.(tuple [var dst_name; e_index]))
-  | ECons {cons; payload} ->
-      let+ (var_used, expr), payload =
+  | EVar var when String.Set.mem var rec_vars ->
+      Ok (var, Expr.(tuple [block; index]))
+  | ECons {cons; payload} -> (
+      let block_name = Fresh_vars.block () in
+      match
         List.find_and_replace_i
           (fun index expr ->
-            let rec_vars =
-              String.Set.(
-                remove_from_env rec_vars
-                  (unions
-                     (List.mapi
-                        (fun index' expr ->
-                          if index' = index then empty else Expr.fv expr )
-                        payload ) ))
-            in
-            let index = index + if Option.is_some cons then 1 else 0 in
-            let+ pvars_used, expr' =
-              expr_dps_after_construct dst_name (Int index) rec_vars expr
-            in
-            ((pvars_used, expr'), Expr.unit) )
+            if
+              not
+              @@ List.forall_i
+                   (fun index' expr' ->
+                     index = index'
+                     || String.Set.(is_empty (inter rec_vars (Expr.fv expr')))
+                     )
+                   payload
+            then None
+            else
+              match
+                let index = index + if Option.is_some cons then 1 else 0 in
+                expr_dps_after_construct
+                  ~block:Expr.(var block_name)
+                  ~index:Expr.(int index)
+                  rec_vars expr
+              with
+              | Error _ ->
+                  None
+              | Ok (var_used, expr') ->
+                  Some ((var_used, expr'), Expr.unit) )
           payload
-      in
-      ( var_used
-      , let cons_ = cons in
-        Expr.(
-          let_var dst'_name
-            ~equal:(ECons {cons= cons_; payload})
-            ~in_:
-              ( seqs
-                  [write ~block:(var dst_name) ~i:e_index ~to_:(var dst'_name)]
-              @@ let_var dst_name ~equal:(var dst'_name) ~in_:expr )) )
+      with
+      | None ->
+          Error
+            {step; reason= "did not find any correct field in constructor"; expr}
+      | Some ((var_used, expr), payload) ->
+          Ok
+            ( var_used
+            , let cons_ = cons in
+              Expr.(
+                let_var block_name
+                  ~equal:(ECons {cons= cons_; payload})
+                  ~in_:(seq (write ~block ~i:index ~to_:(var block_name)) expr))
+            ) )
   | EMatch {arg; branches} ->
-      let* var, branches =
-        option_list_fold_map
-          (fun var (pat, expr) ->
-            let rec_vars =
-              String.Set.remove_from_env rec_vars (Pattern.vars pat)
-            in
-            let* var', expr =
-              expr_dps_after_construct dst_name index rec_vars expr
-            in
-            match var with
-            | Some var ->
-                if var = var' then Some (Some var, (pat, expr)) else None
-            | None ->
-                Some (Some var', (pat, expr)) )
-          None branches
-      in
-      let* var in
-      Some (var, EMatch {arg; branches})
+      let fv_arg = Expr.fv arg in
+      if String.Set.(is_empty (inter rec_vars fv_arg)) then
+        let+ var, branches =
+          result_list_fold_map
+            (fun var (pat, expr) ->
+              let rec_vars = String.Set.diff rec_vars (Pattern.vars pat) in
+              let* var', expr =
+                expr_dps_after_construct ~block ~index rec_vars expr
+              in
+              match var with
+              | Some var ->
+                  if var = var' then Ok (Some var, (pat, expr))
+                  else
+                    Error
+                      { step
+                      ; expr
+                      ; reason=
+                          "different branches mention different recursive \
+                           variables" }
+              | None ->
+                  Ok (Some var', (pat, expr)) )
+            None branches
+        in
+        match var with
+        | None ->
+            failwith "Should never happen"
+        | Some var ->
+            (var, EMatch {arg; branches})
+      else
+        Error
+          { step
+          ; expr
+          ; reason= "the expression that is matched mentions recursive variable"
+          }
   | _ ->
-      None
+      Error {step; expr; reason= "Unhandeld case"}
+
+let step = DuringConstruct
 
 (** [expr_dps_construct rec_vars_complete rec_vars rec_pattern expr]
     - [rec_vars_complete] contains all variables mapped to their index.
-    - [rec_vars] contains variables available for "reading", those provided by
-      the recursive call in the original function.
     - [rec_pattern] contains the pattern we are destructing the recursive
       call with.
     - [expr] contains the construct of the expression we are returning.
@@ -96,15 +143,11 @@ let rec expr_dps_after_construct dst_name index rec_vars expr =
     that should be there. Its returns (at runtime) a destination that will be
     passed to the recursive call for the hole to be filled.
 *)
-let rec expr_dps_construct rec_vars_complete rec_vars rec_pattern expr =
-  print_string "EXPR DPS CONSTRUCT rec_vars =" ;
-  Env.iter (fun var _ -> printf "%s " var) rec_vars ;
-  print_string "; " ;
-  Expr.print expr ;
+let rec expr_dps_construct rec_vars rec_pattern expr =
   match (rec_pattern, expr) with
   | PVar var, expr ->
       let i =
-        match Env.find_opt var rec_vars_complete with
+        match Env.find_opt var rec_vars with
         | None ->
             failwith (sprintf "could not find %s" var)
         | Some i ->
@@ -112,33 +155,61 @@ let rec expr_dps_construct rec_vars_complete rec_vars rec_pattern expr =
       in
       let dst_name = dst_name_of_int i and index_name = index_name_of_int i in
       let+ r =
-        expr_dps_after_construct dst_name (Variable index_name) rec_vars expr
+        expr_dps_after_construct
+          ~block:Expr.(var dst_name)
+          ~index:Expr.(var index_name)
+          (String.Set.env_domain rec_vars)
+          expr
       in
       [r]
   | ( PCons {cons= pcons; payload= ppayload}
     , ECons {cons= econs; payload= epayload} )
     when econs = pcons && List.length ppayload = List.length epayload ->
-      let+ _, exprs =
+      let+ exprs =
         List.combine ppayload epayload
-        |> option_list_fold_map
-             (fun rec_vars (p, e) ->
-               let+ exprs = expr_dps_construct rec_vars_complete rec_vars p e in
-               let rec_vars =
-                 List.fold_left
-                   (fun rec_vars (var, _) ->
-                     printf "removing %s\n" var ; Env.remove var rec_vars )
-                   rec_vars exprs
-               in
-               (rec_vars, exprs) )
-             rec_vars
+        |> result_list_map (fun (p, e) -> expr_dps_construct rec_vars p e)
       in
       List.concat exprs
   | _ ->
-      None
+      Error {step; expr; reason= "Unhandled case"}
 
-let expr_dps_construct rec_vars = expr_dps_construct rec_vars rec_vars
+let expr_dps_construct rec_vars_complete rec_pattern expr =
+  let* r = expr_dps_construct rec_vars_complete rec_pattern expr in
+  let vars = r |> List.map fst |> String.Set.of_list in
+  if List.length r = String.Set.cardinal vars then Ok r
+  else
+    Error
+      { step
+      ; expr
+      ; reason=
+          "Constructor fields do not have a unique mention of each recursive \
+           variable" }
 
 let n_dsts n = List.init n (fun i -> (dst_name_of_int i, index_name_of_int i))
+
+let restore_reccall self args rec_vars exprs =
+  let bds =
+    List.map
+      (fun (var, expr') ->
+        let i_arg = Env.find var rec_vars in
+        ( Pattern.(
+            tuple [var (dst_name_of_int i_arg); var (index_name_of_int i_arg)])
+        , expr' ) )
+      exprs
+  in
+  let destinations =
+    rec_vars |> Env.bindings
+    |> List.sort (fun (_, i) (_, i') -> Int.compare i i')
+    |> List.map (fun (_, i) -> (dst_name_of_int i, index_name_of_int i))
+  in
+  let dst_args =
+    List.fold_right
+      (fun (dst_name, index) acc -> Expr.(var dst_name :: var index :: acc))
+      destinations []
+  in
+  Expr.(let_and bds ~in_:(apply (var (self ^ "_dps")) (dst_args @ args)))
+
+let step = AfterDestruct
 
 (** [expr_dps_after_destruct self args rec_pattern expr]
     - [self] is the name of the function we are transforming.
@@ -149,56 +220,31 @@ let n_dsts n = List.init n (fun i -> (dst_name_of_int i, index_name_of_int i))
 *)
 let rec expr_dps_after_destruct self args rec_pattern expr =
   match (rec_pattern, expr) with
+  | PVar _, _ ->
+      let rec_vars = Pattern.vars_numbered rec_pattern in
+      let+ exprs = expr_dps_construct rec_vars rec_pattern expr in
+      restore_reccall self args rec_vars exprs
   | ( PCons {cons= pcons; payload= ppayload}
     , ECons {cons= econs; payload= epayload} )
     when econs = pcons && List.length ppayload = List.length epayload ->
       let rec_vars = Pattern.vars_numbered rec_pattern in
       let+ exprs = expr_dps_construct rec_vars rec_pattern expr in
-      let bds =
-        List.map
-          (fun (var, expr') ->
-            let i_arg = Env.find var rec_vars in
-            ( Pattern.(
-                tuple
-                  [var (dst_name_of_int i_arg); var (index_name_of_int i_arg)])
-            , expr' ) )
-          exprs
-      in
-      let destinations =
-        rec_vars |> Env.bindings
-        |> List.sort (fun (_, i) (_, i') -> Int.compare i i')
-        |> List.map (fun (_, i) -> (dst_name_of_int i, index_name_of_int i))
-      in
-      let dst_args =
-        List.fold_right
-          (fun (dst_name, index) acc -> Expr.(var dst_name :: var index :: acc))
-          destinations []
-      in
-      Expr.(let_and bds ~in_:(apply (var (self ^ "_dps")) (dst_args @ args)))
+      restore_reccall self args rec_vars exprs
   | _, EMatch {arg; branches} ->
       let success, branches =
         List.fold_left_map
           (fun success (pat, expr) ->
             match expr_dps_after_destruct self args rec_pattern expr with
-            | Some expr ->
+            | Ok expr ->
                 (true, (pat, expr))
-            | None ->
+            | Error _ ->
                 (success, (pat, expr)) )
           false branches
       in
-      if success then Some (EMatch {arg; branches}) else None
+      if success then Ok (EMatch {arg; branches})
+      else Error {step; expr; reason= "no transformable branch was found"}
   | _ ->
-      None
-
-let expr_dps_after_destruct self args rec_pattern expr =
-  let r = expr_dps_after_destruct self args rec_pattern expr in
-  ( match r with
-  | None ->
-      print_endline "failed expr_dps_after_destruct on :" ;
-      Expr.print expr
-  | Some _ ->
-      print_endline "success expr_dps_after_destruct" ) ;
-  r
+      Error {step; expr; reason= "unhandled case"}
 
 (** [expr_dps_notrec rec_pat expr]
     - [rec_pat] is the pattern that is used somewhere else in the function to
@@ -207,6 +253,9 @@ let expr_dps_after_destruct self args rec_pattern expr =
       recursive call.
     Returns an expression that writes the result of [expr] to the destinations
     corresponding to the pattern. *)
+
+let step = BeforeDestruct
+
 let expr_dps_notrec rec_pat expr =
   let rec_vars = Pattern.vars_numbered rec_pat in
   Expr.(
@@ -229,85 +278,69 @@ let expr_dps_notrec rec_pat expr =
     and [e] is an expression that writes the result of [expr] in destinations
     according to the pattern. *)
 let rec expr_dps_before_destruct self n_args expr =
-  let r =
-    match expr with
-    | EMatch
-        {arg= EApply {func= EVar funcname; args}; branches= [(pattern, expr)]}
-      when funcname = self && List.length args = n_args ->
-        let+ expr = expr_dps_after_destruct self args pattern expr in
-        (pattern, expr)
-    | EMatch {arg; branches} ->
-        let rec_pat, branches =
-          List.fold_left_map
-            (fun rec_pat (pat, expr) ->
-              match expr_dps_before_destruct self n_args expr with
-              | Some (rec_pat', expr) -> (
-                match rec_pat with
-                | Some rec_pat ->
-                    if Pattern.(rec_pat = rec_pat') then
-                      (Some rec_pat, (true, pat, expr))
-                    else
-                      failwith
-                        "Destructing with two different patterns, cannot \
-                         determine numbers of arguments"
-                | None ->
-                    (Some rec_pat', (true, pat, expr)) )
-              | None ->
-                  (None, (false, pat, expr)) )
-            None branches
-        in
-        let+ rec_pat in
-        let branches =
-          List.map
-            (fun (transformed, pat, expr) ->
-              if transformed then (pat, expr)
-              else (pat, expr_dps_notrec rec_pat expr) )
-            branches
-        in
-        (rec_pat, EMatch {arg; branches})
-    | _ ->
-        None
-  in
-  (* ( match r with
-     | None ->
-         print_endline "failed transform_expr_dps_before_destruct"
-     | Some (_, expr') ->
-         print_endline "success transform_expr_dps_before_destruct" ;
-         printf "expr_dps_before_destruct : %s became %s\n" (Expr.to_string expr)
-           (Expr.to_string expr') ) ; *)
-  r
-
-let expr_dps_before_destruct self n_args expr =
-  let r = expr_dps_before_destruct self n_args expr in
-  ( match r with
-  | None ->
-      print_endline "failed transform_expr_dps_before_destruct"
-  | Some (_, expr') ->
-      print_endline "success transform_expr_dps_before_destruct" ;
-      printf "expr_dps_before_destruct : %s became %s\n" (Expr.to_string expr)
-        (Expr.to_string expr') ) ;
-  r
-
-(*
-let dsts_of_pat pat =
-  dsts_of_pat pat |> List.map (fun (a, b) -> [a; b]) |> List.concat *)
-
-let expr_cons self expr =
   match expr with
+  | EMatch {arg= EApply {func= EVar funcname; args}; branches= [(pattern, expr)]}
+    when funcname = self && List.length args = n_args ->
+      let+ expr =
+        expr_dps_after_destruct self args pattern (Inline.expr expr)
+      in
+      (pattern, expr)
+  | EMatch {arg; branches} -> (
+      let rec_pat, branches =
+        List.fold_left_map
+          (fun rec_pat (pat, expr) ->
+            match expr_dps_before_destruct self n_args expr with
+            | Ok (rec_pat', expr) -> (
+              match rec_pat with
+              | Some rec_pat ->
+                  if Pattern.(rec_pat = rec_pat') then
+                    (Some rec_pat, (true, pat, expr))
+                  else
+                    failwith
+                      "Destructing with two different patterns, cannot \
+                       determine numbers of arguments"
+              | None ->
+                  (Some rec_pat', (true, pat, expr)) )
+            | Error _ ->
+                (None, (false, pat, expr)) )
+          None branches
+      in
+      match rec_pat with
+      | None ->
+          Error
+            { step
+            ; expr
+            ; reason= "no destructor was found in any of the branches" }
+      | Some rec_pat ->
+          let branches =
+            List.map
+              (fun (transformed, pat, expr) ->
+                if transformed then (pat, expr)
+                else (pat, expr_dps_notrec rec_pat expr) )
+              branches
+          in
+          Ok (rec_pat, EMatch {arg; branches}) )
+  | _ ->
+      Error {step; expr; reason= "unhandled case"}
+
+let step = Entry
+
+let expr self e =
+  match e with
   | EFunc {args; body} ->
       let+ rec_pat, transformed =
-        expr_dps_before_destruct self (List.length args) body
+        Fresh_vars.block_reset () ;
+        body |> Anf.expr |> expr_dps_before_destruct self (List.length args)
       in
       let rec_vars = Pattern.vars_numbered rec_pat in
       let arity = Pattern.n_vars rec_pat in
       let name_dps = self ^ "_dps" in
       let dsts = n_dsts arity in
       let dps =
-        let body = transformed in
         let args =
           (dsts |> List.map (fun (a, b) -> [a; b]) |> List.concat) @ args
         in
-        EFunc {args; body}
+        EFunc {args; body= transformed}
       in
       let rec aux_construct (pat : pattern) =
         match pat with
@@ -340,25 +373,18 @@ let expr_cons self expr =
       in
       (entry_point, dps)
   | _ ->
-      None
-
-let expr_cons self expr =
-  match expr_cons self expr with
-  | Some v ->
-      Some v
-  | None ->
-      Printf.printf "Could not transform %s\n" self ;
-      None
+      Error {step; expr= e; reason= "unhandled case"}
 
 let si si =
   match si with
   | Binding {name; body; is_rec} -> (
       if not is_rec then si
       else
-        match expr_cons name body with
-        | Some (entry, dps) ->
+        match expr name body with
+        | Ok (entry, dps) ->
             MutualRecBindings [(name, entry); (name ^ "_dps", dps)]
-        | None ->
+        | Error e ->
+            printf "Error : %s\n" (error_to_string e) ;
             si )
   | MutualRecBindings _ ->
       si

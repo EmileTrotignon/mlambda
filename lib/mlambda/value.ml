@@ -21,7 +21,8 @@ let rec equals v1 v2 =
   | VBool b, VBool b' ->
       b = b'
   | VArray arr, VArray arr' ->
-      Array.for_all2 equals arr arr'
+      if Array.length arr <> Array.length arr' then false
+      else Array.for_all2 equals arr arr'
   | _, _ ->
       false
 
@@ -38,6 +39,15 @@ let string str = VString str
 let bool b = VBool b
 
 let array arr = VArray arr
+
+let rec list li =
+  match li with
+  | [] ->
+      cons "[]"
+  | ele :: li ->
+      array [|cons "::"; ele; list li|]
+
+let int_list li = li |> List.map int |> list
 
 let to_int = function
   | VInt i ->

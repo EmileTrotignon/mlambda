@@ -11,14 +11,7 @@ let rec transformable_expr self expr =
       List.exists (fun (_pat, expr) -> transformable_expr self expr) branches
   | EFunc {args= _; body} ->
       transformable_expr self body
-  | EApply _
-  | EVar _
-  | EAlloc _
-  | EPrim _
-  | EProj _
-  | EWrite _
-  | EPrimFunc _
-  | EUnit ->
+  | EApply _ | EVar _ | EPrim _ | EPrimFunc _ | EUnit ->
       false
 
 let _ = transformable_expr
@@ -49,46 +42,30 @@ let rec_call_args self n_args expr =
      takes [n_args] arguments. [expr'] is such that recursive calls to [self] in
      tail modulo cons position are replaced to calls to [self ^ "dps"] in tail
      position. *)
-let rec expr_dps self n_args index expr =
+let rec expr_dps self n_args ~dst ~index expr =
   (* - [self] is the name of the recursive function we are transforming.
      - [index] is [None] if the index we need to write to is [e_var "index"],
        and [Some i] if it is [e_int i].
      - [let_cands] is the set of identifiers that are bound to a recursive call,
        are not ever used in that branch.
      - [expr] is the expression we are transforming. *)
-  let e_index =
-    Expr.(
-      match index with Some index -> int (index + 1) | None -> var "index")
-  in
   match expr with
-  (*| EVar var ->
-      (* If [var] was bound to a recursive call earlier in the code, and wasn't
-         ever used in that branch, then we replace it with its arguments.
-      *)
-      let+ args = Env.find_opt var let_cands in
-      ( String.Set.singleton var
-      , EApply
-          {func= EVar (self ^ "_dps"); args= e_var "dst'" :: e_index :: args} )*)
   | e when is_rec_call self n_args e ->
       let args = rec_call_args self n_args e in
-      Some
-        (EApply
-           {func= EVar (self ^ "_dps"); args= Expr.var "dst'" :: e_index :: args}
-        )
-  | EMatch {arg= value; branches= [(PVar var, body_in)]} ->
-      (* We then transform the code after the binding. *)
-      let+ body_in = expr_dps self n_args index body_in in
-      (* And we just restore the binding with the transformed [body_in] *)
-      EMatch {arg= value; branches= [(PVar var, body_in)]}
+      Some (EApply {func= EVar (self ^ "_dps"); args= dst :: index :: args})
   | ECons {cons; payload} ->
+      let block_name = Fresh_vars.block () in
       let+ expr, payload =
         List.find_and_replace_i
           (fun index expr ->
             (* Here we use the current index, because if we manage to transform
                [expr] into [expr'], [expr'] should write in [dst.index]. This
                does not affect success *)
-            (*  *)
-            let+ expr' = expr_dps self n_args (Some index) expr in
+            let index = if Option.is_some cons then index + 1 else index in
+            let+ expr' =
+              expr_dps self n_args ~dst:(Expr.var block_name)
+                ~index:(Expr.int index) expr
+            in
             (* We enter this code if transforming the payload was successful.
                Here, [expr'] is an expression that write the result of the
                evaluation of [expr] in the destination (by induction hypothesis).
@@ -110,11 +87,9 @@ let rec expr_dps self n_args index expr =
            destination. *)
       let cons_ = cons in
       Expr.(
-        let_var "dst'"
+        let_var block_name
           ~equal:(ECons {cons= cons_; payload})
-          ~in_:
-            ( seqs [write ~block:(var "dst") ~i:e_index ~to_:(var "dst'")]
-            @@ let_var "dst" ~equal:(var "dst'") ~in_:expr ))
+          ~in_:(seqs [write ~block:dst ~i:index ~to_:(var block_name)] @@ expr))
   | EMatch {arg; branches} ->
       (* We need to transform the branches. Each branch can be either
          succesfully transformed, or plugged as-is in a write statement.
@@ -123,28 +98,22 @@ let rec expr_dps self n_args index expr =
       let had_a_succes, branches =
         List.fold_left_map
           (fun had_a_success (pat, expr) ->
-            match expr_dps self n_args index expr with
+            match expr_dps self n_args ~dst ~index expr with
             | Some expr ->
                 (true, (pat, expr))
             | None ->
-                ( had_a_success
-                , Expr.(pat, write ~block:(var "dst") ~i:e_index ~to_:expr) ) )
+                (had_a_success, Expr.(pat, write ~block:dst ~i:index ~to_:expr))
+            )
           false branches
       in
       if had_a_succes then Some (Expr.match_ arg ~with_:branches) else None
-  | EFunc _
-  | EApply _
-  | EAlloc _
-  | EPrim _
-  | EProj _
-  | EWrite _
-  | EPrimFunc _
-  | EVar _
-  | EUnit ->
+  | EFunc _ | EApply _ | EPrim _ | EPrimFunc _ | EVar _ | EUnit ->
       (* In all these cases, we fail. *)
       None
 
-let expr_dps self n_args expr = expr |> expr_dps self n_args None
+let expr_dps self n_args expr =
+  Fresh_vars.block_reset () ;
+  expr_dps self n_args ~dst:Expr.(var "dst") ~index:Expr.(var "i") expr
 
 (** [transform_expr self expr] is either [None] if no transformation was found,
     or [Some (entry, dps)] where a call to [entry] has the same semantics as
@@ -164,7 +133,7 @@ let expr self e =
               ; apply (var "print") [var "dst"] ])
           @@ transformed
         in
-        let args = ["dst"; "index"] @ args in
+        let args = ["dst"; "i"] @ args in
         EFunc {args; body}
       in
       let entry_point =

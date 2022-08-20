@@ -70,24 +70,24 @@ let rec expr ?(context = false) e =
       ^-^ separate_map space ( !^ ) args
       ^-^ arrow
       ^^ nest_break (expr body)
+  | EPrim p ->
+      primitive p
+  | EApply {func= EVar "alloc"; args= [n]} ->
+      group @@ !^"alloc" ^^ nest 2 (break 1 ^^ expr ~context:true n)
+  | EApply {func= EVar "proj"; args= [arr; index]} ->
+      let context = true in
+      expr ~context arr ^^ dot ^^ expr ~context index
+  | EApply {func= EVar "write"; args= [arr; index; value]} ->
+      (if context then parens else Fun.id)
+      @@
+      let context = true in
+      expr ~context arr ^^ dot ^^ expr ~context index ^-^ !^"<-" ^-^ expr value
   | EApply {func; args} ->
       (if context then parens else Fun.id)
       @@
       let context = true in
       expr ~context func
       ^^ group (break 1 ^^ separate_map (break 1) (expr ~context) args)
-  | EAlloc n ->
-      group @@ !^"alloc" ^^ nest 2 (break 1 ^^ expr ~context:true n)
-  | EPrim p ->
-      primitive p
-  | EProj {arr; index} ->
-      let context = true in
-      expr ~context arr ^^ dot ^^ expr ~context index
-  | EWrite {arr; index; value} ->
-      (if context then parens else Fun.id)
-      @@
-      let context = true in
-      expr ~context arr ^^ dot ^^ expr ~context index ^-^ !^"<-" ^-^ expr value
   | EMatch
       { arg= cond
       ; branches=
@@ -120,28 +120,53 @@ let rec expr ?(context = false) e =
              (fun (p, e) -> space ^^ pattern p ^-^ equals ^^ nest_break (expr e))
              (List.combine payload_p payload_e)
         ^/^ !^"in" )
-      ^/^ expr body_in
+      ^/^ expr_semin body_in
   | EMatch {arg; branches= [(PAny, e)]} ->
-      group (expr_semi arg ^-^ semi ^/^ expr e)
+      group (expr_semin arg ^-^ semi ^/^ expr e)
   | EMatch {arg= value; branches= [(p, body_in)]} ->
       group
         (!^"let" ^-^ pattern p ^-^ equals ^^ nest_break (expr value) ^/^ !^"in")
-      ^/^ expr body_in
+      ^/^ expr_semin body_in
   | EMatch {arg; branches} ->
       (if context then parens else Fun.id)
       @@ group (!^"match" ^^ nest_break (expr arg) ^/^ !^"with")
       ^^ concat_map
            (fun (p, e) ->
-             (break 1 ^^ !^"|" ^-^ pattern p ^-^ arrow) ^^ nest_break (expr e)
-             )
+             break 1
+             ^^ group (!^"|" ^-^ pattern p ^-^ arrow ^^ nest_break (expr e)) )
            branches
   | EPrimFunc (name, _) ->
       !^"primitive" ^^ braces !^name
 
-and expr_semi e =
+and expr_semin e =
   match e with
   | EMatch {arg; branches= [(PAny, e)]} ->
-      expr_semi arg ^-^ semi ^/^ expr e
+      expr_semin arg ^-^ semi ^/^ expr_semin e
+  | EMatch
+      { arg= ECons {cons= None; payload= payload_e}
+      ; branches= [(PCons {cons= None; payload= payload_p}, body_in)] }
+    when List.length payload_p = List.length payload_e ->
+      ( List.combine payload_p payload_e
+      |> List.mapi (fun i (p, e) ->
+             let is_first = i = 0 in
+             (if not is_first then break 1 else empty)
+             ^^ group
+                  ( !^(if i = 0 then "let" else "and")
+                  ^^ space ^^ pattern p ^-^ equals
+                  ^^ nest_break (expr e) ) )
+      |> concat )
+      (*
+      ( !^"let"
+      ^^ separate_map
+           (break 1 ^^ !^"and")
+           (fun (p, e) -> space ^^ pattern p ^-^ equals ^^ nest_break (expr e))
+           (List.combine payload_p payload_e) *)
+      ^/^ !^"in"
+      ^/^ expr_semin body_in
+  | EMatch {arg= value; branches= [(p, body_in)]} ->
+      group
+        (!^"let" ^-^ pattern p ^-^ equals ^^ nest_break (expr value) ^/^ !^"in")
+      ^/^ expr_semin body_in
   | _ ->
       expr e
 
@@ -185,9 +210,9 @@ let to_string f arg =
   ToBuffer.pretty 0.8 80 buffer doc ;
   Buffer.contents buffer
 
-let to_format f fmt arg =
-  let doc = f arg in
-  ToFormatter.pretty 0.8 80 fmt doc
+let to_format f fmt arg = Format.fprintf fmt "%s" (to_string f arg)
+(*let doc = f arg in
+  ToFormatter.pretty 0.8 80 fmt doc*)
 
 module type Printer = sig
   type a

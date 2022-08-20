@@ -60,7 +60,7 @@ let _print_token (tok : Parser.token) =
 
 let token buf =
   let tok = Lexer.token buf in
-  _print_token tok ; tok
+  (*_print_token tok ; *)tok
 
 let lexbuf buf = Parser.program token buf
 

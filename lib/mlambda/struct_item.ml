@@ -22,6 +22,15 @@ let prim_func_def_ar2 name func =
     | _ ->
         failwith (Printf.sprintf "%s expects 2 arguments" name) )
 
+
+let prim_func_def_ar3 name func =
+  prim_func_def name (function
+    | [v1; v2; v3] ->
+        func v1 v2 v3
+    | _ ->
+        failwith (Printf.sprintf "%s expects 2 arguments" name) )
+
+
 let is_tailrec (si : t) =
   match si with
   | Binding {name; is_rec; body} ->

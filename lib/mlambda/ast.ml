@@ -14,14 +14,9 @@ and expr =
   | EVar of ident
   | EFunc of {args: ident list; body: expr}
   | EApply of {func: expr; args: expr list}
-  | EAlloc of expr
   | EPrim of primitive
-  | EProj of {arr: expr; index: expr}
-  | EWrite of {arr: expr; index: expr; value: expr}
   | EUnit
- (* cons is optionnal because tuples do not have a cons *)
   | ECons of {cons: cons option; payload: expr list}
-  (* | ELet of {var: ident; is_rec: bool; value: expr; body_in: expr} *)
   | EMatch of {arg: expr; branches: (pattern * expr) list}
   | EPrimFunc of string * (value list -> value)
 
@@ -35,9 +30,8 @@ and value =
   | VFunc of {mutable env: value Env.t; args: ident list; body: expr}
   | VPrFunc of string * (value list -> value)
 
-and struct_item =
+type struct_item =
   | Binding of {name: ident; is_rec: bool; body: expr}
   | MutualRecBindings of (ident * expr) list
 
 type program = struct_item list
-

@@ -86,7 +86,7 @@ let branch :=
 
 let write_expr :=
 | ~=if_expr; <>
-| arr=proj_expr; DOT; LPAR; index=proj_expr; RPAR; LARROW; value=if_expr; { EWrite {arr; index; value} }
+| block=proj_expr; DOT; LPAR; i=proj_expr; RPAR; LARROW; to_=if_expr; { Expr.write ~block ~i ~to_ }
 
 let if_expr :=
 | ~=cons_expr; <>
@@ -101,7 +101,7 @@ let apply_expr :=
 | ~=proj_expr; <>
 | func=not_cons_expr; args=nonempty_list(proj_expr); { EApply {func; args} }
 (*| cons=cons; arg=atomic_expr; { ECons {cons; payload=[arg]} }*)
-| ALLOC; ~=proj_expr; <EAlloc>
+| ALLOC; size=proj_expr; { Expr.alloc ~size }
 
 let not_cons_expr :=
 | ~=ident; <EVar>
@@ -109,7 +109,7 @@ let not_cons_expr :=
 
 let proj_expr :=
 | ~=paren_expr; <>
-| arr=proj_expr; DOT; LPAR; index=proj_expr; RPAR; { EProj {arr; index} }
+| arr=proj_expr; DOT; LPAR; index=proj_expr; RPAR; { Expr.proj arr index }
 
 let paren_expr :=
 | ~=atomic_expr; <>
