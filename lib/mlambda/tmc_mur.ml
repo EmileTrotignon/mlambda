@@ -85,7 +85,7 @@ let rec expr_dps_after_construct ~block ~index rec_vars expr =
               Expr.(
                 let_var block_name
                   ~equal:(ECons {cons= cons_; payload})
-                  ~in_:(seq (write ~block ~i:index ~to_:(var block_name)) expr))
+                  ~in_:(seq (write ~block ~i:index ~to_:(var block_name)) expr) )
             ) )
   | EMatch {arg; branches} ->
       let fv_arg = Expr.fv arg in
@@ -193,7 +193,7 @@ let restore_reccall self args rec_vars exprs =
       (fun (var, expr') ->
         let i_arg = Env.find var rec_vars in
         ( Pattern.(
-            tuple [var (dst_name_of_int i_arg); var (index_name_of_int i_arg)])
+            tuple [var (dst_name_of_int i_arg); var (index_name_of_int i_arg)] )
         , expr' ) )
       exprs
   in
@@ -231,18 +231,14 @@ let rec expr_dps_after_destruct self args rec_pattern expr =
       let+ exprs = expr_dps_construct rec_vars rec_pattern expr in
       restore_reccall self args rec_vars exprs
   | _, EMatch {arg; branches} ->
-      let success, branches =
-        List.fold_left_map
-          (fun success (pat, expr) ->
-            match expr_dps_after_destruct self args rec_pattern expr with
-            | Ok expr ->
-                (true, (pat, expr))
-            | Error _ ->
-                (success, (pat, expr)) )
-          false branches
+      let+ branches =
+        result_list_map
+            (fun (pat, expr) ->
+            let+ expr = expr_dps_after_destruct self args rec_pattern expr in
+            (pat, expr) )
+          branches
       in
-      if success then Ok (EMatch {arg; branches})
-      else Error {step; expr; reason= "no transformable branch was found"}
+      EMatch {arg; branches}
   | _ ->
       Error {step; expr; reason= "unhandled case"}
 
@@ -267,7 +263,7 @@ let expr_dps_notrec rec_pat expr =
                  ~block:(var (dst_name_of_int i))
                  ~i:(var (index_name_of_int i))
                  ~to_:(var varname) )
-        |> seq_of_list ))
+        |> seq_of_list ) )
 
 (** [expr_dps_before_destruct self n_args expr]
     - [self] is the name of the recursive function we are transforming.
@@ -369,7 +365,7 @@ let expr self e =
                                |> List.concat |> List.map var )
                              @ (args |> List.map var) ) ]
                          (aux_construct rec_pat) )
-                      dsts ) ))
+                      dsts ) ) )
       in
       (entry_point, dps)
   | _ ->
